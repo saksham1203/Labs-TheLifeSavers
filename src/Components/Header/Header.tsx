@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  FaUserEdit,
   FaSignOutAlt,
   FaInfoCircle,
   FaTimes,
@@ -10,9 +9,7 @@ import {
   FaFileContract,
   FaShieldAlt,
   FaSignInAlt,
-  FaUserPlus,
   FaSearch,
-  FaComments,
   FaEnvelope,
   FaTint,
 } from "react-icons/fa";
@@ -207,16 +204,6 @@ const Header: React.FC = () => {
                 to: "/dashboard",
                 icon: <FaSearch className="mr-2 text-xl" />,
                 label: "Find Donors",
-              },
-              {
-                to: "/profile",
-                icon: <FaUserEdit className="mr-2 text-xl" />,
-                label: "Edit Profile",
-              },
-              {
-                to: "/community",
-                icon: <FaComments className="mr-2 text-xl" />,
-                label: "Community Chat",
               },
               {
                 to: "/blogs",

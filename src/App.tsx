@@ -6,11 +6,9 @@ import ErrorPage from "./pages/ErrorPage/ErrorPage";
 import ProtectedRoute from "./Components/ProtectedRoute";
 import PublicRoute from "./Components/PublicRoute";
 import PrivacyPolicy from "./pages/PrivacyPolicy/PrivacyPolicy";
-import Community from "./Components/Community/Community";
 
 // Lazy load components to optimize performance
 const Dashboard = lazy(() => import("./pages/Dashboard/Dashboard"));
-const UserProfile = lazy(() => import("./pages/UserProfile/UserProfile"));
 const Landing = lazy(()=> import("./pages/Landing/Landing"))
 const Login = lazy(() => import("./pages/Login/Login"));
 const ForgotPassword = lazy(() => import("./Components/ForgotPassword/ForgotPassword"));
@@ -41,14 +39,12 @@ const PATHS = {
   LOGIN: "/login",
   FORGOT_PASSWORD: "/forgot-password",
   DASHBOARD: "/dashboard",
-  PROFILE: "/profile",
   REVIEWS: "/reviews",
   ABOUT_US: "/about-us",
   TERMS: "/terms-and-conditions",
   PRIVACY_POLICY: "/privacy-policy",
   BLOGS: "/blogs",
   BLOG_DETAIL: "/blogs/:title", // Dynamic path for blog detail
-  COMMUNITY: "/community", // New path for Community page
   CONTACT_US: "/contact-us", // New path for ContactUs page
   LEARN_ABOUT_DONATION: "/learn-about-donation", // New path for LearnAboutDonation
 };
@@ -104,20 +100,6 @@ const App = () => {
           ],
         },
         {
-          path: PATHS.PROFILE,
-          element: <ProtectedRoute />,
-          children: [
-            {
-              path: PATHS.PROFILE,
-              element: (
-                <Suspense fallback={<div>Loading...</div>}>
-                  <UserProfile />
-                </Suspense>
-              ),
-            },
-          ],
-        },
-        {
           path: PATHS.ABOUT_US,
           element: (
             <PublicRoute>
@@ -166,20 +148,6 @@ const App = () => {
               </Suspense>
             </PublicRoute>
           ),
-        },
-        {
-          path: PATHS.COMMUNITY,
-          element: <ProtectedRoute />,
-          children: [
-            {
-              path: PATHS.COMMUNITY,
-              element: (
-                <Suspense fallback={<div>Loading...</div>}>
-                  <Community />
-                </Suspense>
-              ),
-            },
-          ],
         },
         {
           path: PATHS.CONTACT_US, // Route for ContactUs

@@ -61,11 +61,6 @@ export const metaTags: Record<string, MetaData> = {
     description: "Explore blogs about blood donation awareness, real-life stories, health tips, and more.",
     canonical: "https://thelifesavers.in/blogs",
   },
-  "/community": {
-    title: "Community | The Life Savers",
-    description: "Join our vibrant blood donation community, share experiences, and support each other.",
-    canonical: "https://thelifesavers.in/community",
-  },
   "/contact-us": {
     title: "Contact Us | The Life Savers",
     description: "Need help or have questions? Contact The Life Savers team — we’re here to support you.",
