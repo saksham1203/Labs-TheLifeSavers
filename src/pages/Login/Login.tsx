@@ -70,7 +70,7 @@ const Login: React.FC = () => {
         <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full overflow-hidden relative animate-fade-in">
           {/* Header Section */}
           <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-400 text-white text-center py-8 px-6">
-            <h1 className="text-4xl font-extrabold mb-2">Login</h1>
+            <h1 className="text-4xl font-extrabold mb-2">Lab Login</h1>
           </div>
 
           {/* Content Section */}
@@ -90,11 +90,12 @@ const Login: React.FC = () => {
             </div>
             <div className="w-full sm:w-1/2 p-8 flex flex-col justify-center items-center">
               <h2 className="text-3xl font-bold text-gray-800 mb-4 text-center">
-                Welcome back,{" "}
+                Welcome,{" "}
                 <span className="text-3xl text-red-600 font-bold">
-                  Life Saver
+                  Lab Partner
                 </span>
               </h2>
+
               <div className="flex items-center mb-2 w-full">
                 <hr className="flex-1 border-gray-300" />
                 <span className="mx-4 text-sm text-gray-600">
@@ -228,14 +229,8 @@ const Login: React.FC = () => {
               </form>
               <div className="flex items-center mt-4 w-full">
                 <hr className="flex-1 border-gray-300" />
-                <span className="mx-4 text-sm text-gray-600">
-                  Don't have an account?{" "}
-                  <Link
-                    to="/register"
-                    className="font-medium text-red-600 hover:text-red-500"
-                  >
-                    Sign up
-                  </Link>
+                <span className="mx-4 text-sm text-gray-600 text-center">
+                  Need access? Please contact your Life Savers administrator.
                 </span>
                 <hr className="flex-1 border-gray-300" />
               </div>

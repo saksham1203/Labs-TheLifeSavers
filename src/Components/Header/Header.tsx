@@ -132,7 +132,7 @@ const Header: React.FC = () => {
                   isScrolled ? "text-lg" : "text-xl"
                 }`}
               >
-                The Life Savers
+                The Life Savers Labs
               </span>
               {/* <span
                 className="absolute right-0 text-xs font-medium text-red-500"
@@ -304,11 +304,6 @@ const Header: React.FC = () => {
                 to: "/login",
                 icon: <FaSignInAlt className="mr-2 text-xl" />,
                 label: "Login",
-              },
-              {
-                to: "/register",
-                icon: <FaUserPlus className="mr-2 text-xl" />,
-                label: "Register",
               },
               {
                 to: "/learn-about-donation",

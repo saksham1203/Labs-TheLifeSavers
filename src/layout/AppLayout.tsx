@@ -5,7 +5,6 @@ import Header from "../Components/Header/Header";
 import Footer from "../Components/Footer/Footer";
 import ContactIcon from "../Components/ContactIcon/ContactIcon";
 import ScrollToTopButton from "../Components/ScrollToTopButton/ScrollToTopButton";
-import ReviewIcon from "../Components/ReviewIcon/ReviewIcon";
 import SplashScreen from "../Components/SplashScreen/SplashScreen";
 import ErrorBoundary from "../Components/ErrorBoundary";
 import DisclaimerModal from "../Components/Models/DisclaimerModel";
@@ -48,7 +47,6 @@ const AppLayout = () => {
 
   const memoizedHeader = useMemo(() => <Header />, []);
   const memoizedFooter = useMemo(() => <Footer />, []);
-  const memoizedReviewIcon = useMemo(() => <ReviewIcon />, []);
   const memoizedContactIcon = useMemo(() => <ContactIcon />, []);
   const memoizedScrollToTopButton = useMemo(() => <ScrollToTopButton />, []);
 
@@ -80,7 +78,6 @@ const AppLayout = () => {
                   <main className="flex-1">
                     <Outlet />
                   </main>
-                  {memoizedReviewIcon}
                   {memoizedContactIcon}
                   {memoizedScrollToTopButton}
                   {memoizedFooter}

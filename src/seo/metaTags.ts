@@ -16,11 +16,6 @@ export const metaTags: Record<string, MetaData> = {
     canonical: "https://thelifesavers.in/",
     keywords: "donate blood, blood donors India, urgent blood need, life savers, blood donation app",
   },
-  "/register": {
-    title: "Register as a Blood Donor | The Life Savers",
-    description: "Become a blood donor and help save lives with The Life Savers. Sign up in seconds and make an impact.",
-    canonical: "https://thelifesavers.in/register",
-  },
   "/login": {
     title: "Login | The Life Savers",
     description: "Log in to your Life Savers account and access donor features, recipient requests, and more.",

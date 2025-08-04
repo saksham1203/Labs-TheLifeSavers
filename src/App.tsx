@@ -12,9 +12,7 @@ import Community from "./Components/Community/Community";
 const Dashboard = lazy(() => import("./pages/Dashboard/Dashboard"));
 const UserProfile = lazy(() => import("./pages/UserProfile/UserProfile"));
 const Landing = lazy(()=> import("./pages/Landing/Landing"))
-const Register = lazy(() => import("./pages/Register/Register"));
 const Login = lazy(() => import("./pages/Login/Login"));
-const UserReviews = lazy(() => import("./pages/UserReviews/UserReviews"));
 const ForgotPassword = lazy(() => import("./Components/ForgotPassword/ForgotPassword"));
 const AboutUs = lazy(() => import("./pages/AboutUs/AboutUs"));
 const TermsAndConditions = lazy(() =>
@@ -40,7 +38,6 @@ const queryClient = new QueryClient({
 
 const PATHS = {
   ROOT: "/",
-  REGISTER: "/register",
   LOGIN: "/login",
   FORGOT_PASSWORD: "/forgot-password",
   DASHBOARD: "/dashboard",
@@ -70,16 +67,6 @@ const App = () => {
             <PublicRoute>
               <Suspense fallback={<div>Loading...</div>}>
                 <Landing />
-              </Suspense>
-            </PublicRoute>
-          ),
-        },
-        {
-          path: PATHS.REGISTER,
-          element: (
-            <PublicRoute>
-              <Suspense fallback={<div>Loading...</div>}>
-                <Register />
               </Suspense>
             </PublicRoute>
           ),
@@ -129,14 +116,6 @@ const App = () => {
               ),
             },
           ],
-        },
-        {
-          path: PATHS.REVIEWS,
-          element: (
-            <Suspense fallback={<div>Loading...</div>}>
-              <UserReviews />
-            </Suspense>
-          ),
         },
         {
           path: PATHS.ABOUT_US,

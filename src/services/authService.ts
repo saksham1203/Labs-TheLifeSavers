@@ -44,31 +44,6 @@ export const verifyOtp = (email: string, otp: string): Promise<AxiosResponse<any
     });
 };
 
-// Register User
-interface NewUser {
-  name: string;
-  email: string;
-  password: string;
-  mobileNumber: string;
-  availability: string;
-  dob: string;
-}
-
-export const registerUser = (newUser: NewUser): Promise<AxiosResponse<any>> => {
-  const transformedData = {
-    ...newUser,
-    mobileNumber: `+91${newUser.mobileNumber}`,
-    availability: newUser.availability === 'available',
-    dob: newUser.dob,
-  };
-
-  return axios.post(`${API_URL}/register`, transformedData, { withCredentials: true })
-    .catch(error => {
-      console.error('User registration failed:', error);
-      throw error;
-    });
-};
-
 // Verify Password
 export const verifyPassword = async (password: string) => {
   try {
