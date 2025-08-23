@@ -1,662 +1,1281 @@
-import React, {
-  ReactNode,
-  useState,
-  FormEvent,
-  useEffect,
-  useRef,
-} from "react";
-import { useForm, SubmitHandler } from "react-hook-form";
-// import { useDonorsQuery, useVerifyPasswordMutation } from "../hooks/useDashboardHooks";
+import React, { useMemo, useState, ReactNode } from "react";
 import {
-  useDonorsQuery,
-  useVerifyPasswordMutation,
-} from "../../hooks/useDashboardHooks";
+  FaArrowLeft,
+  FaClipboard,
+  FaClock,
+  FaEdit,
+  FaFileAlt,
+  FaFlask,
+  FaMapMarkerAlt,
+  FaPhone,
+  FaPrint,
+  FaSave,
+  FaUser,
+  FaUserMd,
+  FaCheckCircle,
+  FaCog,
+  FaTruck,
+  FaWhatsapp,
+  FaEnvelope,
+  FaTimes,
+  FaPaperclip,
+  // added for filters:
+  FaSearch,
+  FaFilter,
+  FaSort,
+} from "react-icons/fa";
 
-import { getStates, getDistricts, getCities } from "../../Components/indiaData";
-import { FaLock, FaPhoneAlt } from "react-icons/fa";
+// ---- Types reused from customer app ----
+type OrderStatus =
+  | "PLACED"
+  | "SAMPLE_COLLECTED"
+  | "IN_PROGRESS"
+  | "REPORT_READY"
+  | "COMPLETED"
+  | "CANCELLED";
 
-export interface FindDonor {
-  bloodGroup: string;
-  country: string;
-  state: string;
-  district: string;
+const ORDER_STEPS: { key: OrderStatus; label: string }[] = [
+  { key: "PLACED", label: "Order Placed" },
+  { key: "SAMPLE_COLLECTED", label: "Sample Collected" },
+  { key: "IN_PROGRESS", label: "In Progress" },
+  { key: "REPORT_READY", label: "Report Ready" },
+  { key: "COMPLETED", label: "Completed" },
+  { key: "CANCELLED", label: "Cancelled" },
+];
+
+const STATUS_INDEX: Record<OrderStatus, number> = ORDER_STEPS.reduce(
+  (acc, s, idx) => ((acc[s.key] = idx), acc),
+  {} as Record<OrderStatus, number>
+);
+
+// ---- Additional merchant-side types ----
+interface Address {
+  line1: string;
+  line2?: string;
   city: string;
+  state: string;
+  pincode: string;
 }
 
-export interface Donor {
-  gender: ReactNode;
-  firstName: ReactNode;
-  lastName: ReactNode;
+interface Patient {
   name: string;
-  availability: boolean;
-  mobile: string;
-  reportUrl: string;
-  mobileNumber?: string;
+  age: number;
+  gender: "Male" | "Female" | "Other";
+  phone: string;
+  email?: string;
 }
 
-export interface VerifyPasswordResponse {
-  isValid: boolean;
-  msg?: string;
+interface Item {
+  id: string;
+  name: string;
+  type: "package" | "test";
+  price: number;
 }
 
-const Dashboard: React.FC = () => {
-  const donorListRef = useRef<HTMLDivElement>(null); // Ref for Donors List section
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isValid },
-    watch,
-  } = useForm<FindDonor>({ mode: "onChange" });
+interface Payment {
+  method: "COD" | "UPI" | "Card" | "NetBanking";
+  status: "Pending" | "Paid" | "Refunded";
+  txnId?: string;
+}
 
-  // const [, setSelectedCountry] = useState<string>("");
-  const [states, setStates] = useState<string[]>([]);
-  const [districts, setDistricts] = useState<string[]>([]);
-  const [cities, setCities] = useState<string[]>([]);
-  const [bloodGroups] = useState<string[]>([
-    "A+",
-    "A-",
-    "B+",
-    "B-",
-    "AB+",
-    "AB-",
-    "O+",
-    "O-",
-  ]);
-  const [showResult, setShowResult] = useState<boolean>(false);
-  const [showPopup, setShowPopup] = useState<boolean>(false);
-  const [selectedDonor] = useState<Donor | null>(null);
-  // const [selectedDonor, setSelectedDonor] = useState<Donor | null>(null);
-  const [password, setPassword] = useState<string>("");
-  const [showFullNumber, setShowFullNumber] = useState<boolean>(false);
-  const [popupMessage, setPopupMessage] = useState<string>("");
+interface Phlebotomist {
+  id: string;
+  name: string;
+  phone: string;
+}
 
-  const countries = ["Select Country", "India"];
+interface ActivityEvent {
+  ts: string; // ISO
+  message: string;
+}
 
-  const handleCountryChange = (selectedCountry: string) => {
-    if (selectedCountry === "India") {
-      setStates(getStates()); // Fetch states from indiaData.ts
-      setDistricts([]); // Reset districts
-      setCities([]); // Reset cities
-    } else {
-      setStates([]);
-      setDistricts([]);
-      setCities([]);
-    }
+interface Order {
+  id: string;
+  placedAt: string; // ISO
+  labName: string;
+  patient: Patient;
+  address: Address;
+  items: Item[];
+  subtotal: number;
+  discount: number;
+  deliveryFee: number;
+  total: number;
+  status: OrderStatus;
+  payment: Payment;
+  pickupWindow?: { start: string; end: string }; // ISO
+  phlebotomist?: Phlebotomist;
+  reportUrl?: string;
+  notes?: string; // internal notes
+  instructions?: string; // customer notes
+  activity: ActivityEvent[];
+}
+
+// ---- Mock orders ----
+const MOCK_ORDER: Order = {
+  id: "ORD-2025-00073",
+  placedAt: new Date().toISOString(),
+  labName: "City Diagnostic Lab",
+  patient: {
+    name: "Aarav Sharma",
+    age: 32,
+    gender: "Male",
+    phone: "+91 98XXXXXX21",
+    email: "aarav@example.com",
+  },
+  address: {
+    line1: "Flat 402, Green Meadows",
+    line2: "Near River Park",
+    city: "Pune",
+    state: "MH",
+    pincode: "411045",
+  },
+  items: [
+    { id: "pkg1", name: "Basic Health Checkup", type: "package", price: 999 },
+    { id: "test8", name: "HbA1c (Diabetes Test)", type: "test", price: 499 },
+  ],
+  subtotal: 1498,
+  discount: 100,
+  deliveryFee: 49,
+  total: 1447,
+  status: "PLACED",
+  payment: { method: "UPI", status: "Pending" },
+  instructions: "Fasting since 8 hours. Preferred morning pickup.",
+  activity: [
+    { ts: new Date().toISOString(), message: "Order created by user" },
+  ],
+};
+
+const MOCK_ORDER_B: Order = {
+  ...MOCK_ORDER,
+  id: "ORD-2025-00074",
+  patient: {
+    name: "Neha Verma",
+    age: 28,
+    gender: "Female",
+    phone: "+91 98XXXXXX11",
+    email: "neha@example.com",
+  },
+  status: "IN_PROGRESS",
+  payment: { method: "Card", status: "Paid", txnId: "TXN-987654" },
+  activity: [
+    { ts: new Date().toISOString(), message: "Order created by user" },
+    { ts: new Date().toISOString(), message: "Sample received at lab" },
+  ],
+};
+
+// ---- UI helpers ----
+const pill = (text: string, cls = "bg-red-100 text-red-700 border-red-200") => (
+  <span
+    className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${cls}`}
+  >
+    {text}
+  </span>
+);
+
+const humanize = (s: string) => s.replace(/_/g, " ");
+
+interface SectionCardProps {
+  title: ReactNode;
+  right?: ReactNode;
+  className?: string;
+  children?: ReactNode;
+}
+
+const SectionCard: React.FC<SectionCardProps> = ({
+  title,
+  right,
+  className,
+  children,
+}) => (
+  <div
+    className={`rounded-2xl border border-red-100 bg-white/70 backdrop-blur shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition ${
+      className ?? ""
+    }`}
+  >
+    <div className="flex items-center justify-between px-4 sm:px-6 py-3 bg-gradient-to-r from-red-50/80 to-red-100/80 rounded-t-2xl">
+      <h3 className="text-sm sm:text-base font-bold text-red-700 flex items-center gap-2">
+        {title}
+      </h3>
+      {right}
+    </div>
+    <div className="p-4 sm:p-6">{children}</div>
+  </div>
+);
+
+const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
+  const map: Record<OrderStatus, string> = {
+    PLACED: "bg-blue-50 text-blue-700 border-blue-200",
+    SAMPLE_COLLECTED: "bg-purple-50 text-purple-700 border-purple-200",
+    IN_PROGRESS: "bg-amber-50 text-amber-700 border-amber-200",
+    REPORT_READY: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    COMPLETED: "bg-green-50 text-green-700 border-green-200",
+    CANCELLED: "bg-gray-50 text-gray-700 border-gray-200",
   };
+  return pill(humanize(status), map[status]);
+};
 
-  const handleStateChange = (selectedState: string) => {
-    const fetchedDistricts = getDistricts(selectedState); // Fetch districts dynamically
-    setDistricts(fetchedDistricts); // Set districts for selected state
-    setCities([]); // Reset cities
-  };
+const icons = [
+  <FaClipboard />,
+  <FaFlask />,
+  <FaCog />,
+  <FaFileAlt />,
+  <FaCheckCircle />,
+  <FaTimes />,
+];
 
-  const handleDistrictChange = (
-    selectedDistrict: string,
-    selectedState: string
-  ) => {
-    const fetchedCities = getCities(selectedState, selectedDistrict); // Fetch cities dynamically
-    setCities(fetchedCities); // Set cities for selected district
-  };
-
-  // const handleCityChange = (selectedCity: string) => {
-  //   console.log(`Selected City: ${selectedCity}`); // Log the selected city
-  // };
-
-  const { data: donors, isLoading, isError, refetch } = useDonorsQuery(watch);
-
-  useEffect(() => {
-    if (showResult) {
-      const donorListSection = document.getElementById("donor-list");
-      if (donorListSection) {
-        donorListSection.scrollIntoView({ behavior: "smooth" });
-      }
-    }
-  }, [showResult]); // Run when showResult changes
-
-  // UseEffect to scroll when showResult becomes true
-  useEffect(() => {
-    if (showResult && donorListRef.current) {
-      donorListRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [showResult]); // Trigger this effect when showResult changes
-
-  const onSubmit: SubmitHandler<FindDonor> = (data) => {
-    console.log(data);
-    setShowResult(true);
-    refetch();
-
-    donorListRef.current?.scrollIntoView({ behavior: "smooth" });
-
-    // Scroll to Donor List using getElementById
-    const donorListSection = document.getElementById("donor-list");
-    if (donorListSection) {
-      donorListSection.scrollIntoView({ behavior: "smooth" });
-    }
-  };
-
-  // const handleMobileClick = (donor: Donor) => {
-  //   setSelectedDonor(donor);
-  //   setShowPopup(true);
-  //   setShowFullNumber(false);
-  //   setPopupMessage(""); // Clear any previous message
-  // };
-
-  const mutation = useVerifyPasswordMutation();
-
-  const handlePasswordSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    mutation.mutate(password, {
-      onSuccess: (data) => {
-        if (data.isValid) {
-          setShowFullNumber(true);
-          setPopupMessage(""); // Clear the error message
-        } else {
-          setPopupMessage(data.msg || "Password is incorrect");
-        }
-      },
-      onError: (error: any) => {
-        if (error.response && error.response.data && error.response.data.msg) {
-          setPopupMessage(error.response.data.msg);
-        } else {
-          setPopupMessage("An error occurred while verifying the password");
-        }
-      },
-    });
-    setPassword("");
-  };
-
-  const maskedMobile = (mobile?: string) => {
-    if (!mobile) return ""; // Handle case where mobile is undefined or null
-
-    return `${mobile.slice(0, 2)}xxxxxx${mobile.slice(-2)}`;
-  };
-
+const Stepper: React.FC<{ status: OrderStatus }> = ({ status }) => {
+  const idx = STATUS_INDEX[status];
   return (
-    <>
-      <div
-        className="min-h-screen bg-white flex items-center justify-center p-4"
-        style={{ paddingTop: "4rem", paddingBottom: "4rem" }}
-      >
-        <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full overflow-hidden relative animate-fade-in">
-          {/* Header Section */}
-          <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-400 text-white text-center py-8 px-6">
-            <h1 className="text-4xl font-extrabold mb-2">Find Blood Donor</h1>
-          </div>
-
-          {/* Content Section */}
-          <div className="p-8">
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label
-                    htmlFor="bloodGroup"
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    Blood Group
-                  </label>
-                  <select
-                    id="bloodGroup"
-                    {...register("bloodGroup", {
-                      required: "Blood group is required",
-                    })}
-                    className={`mt-1 block w-full px-3 py-2 border ${
-                      errors.bloodGroup ? "border-red-500" : "border-gray-300"
-                    } rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm`}
-                  >
-                    <option value="">Select Blood Group</option>
-                    {bloodGroups.map((group, index) => (
-                      <option key={index} value={group}>
-                        {group}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.bloodGroup && (
-                    <p className="text-red-500 text-sm mt-1">
-                      {errors.bloodGroup.message}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label
-                    htmlFor="country"
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    Country
-                  </label>
-                  <select
-                    id="country"
-                    {...register("country", {
-                      required: "Country is required",
-                    })}
-                    onChange={(e) => handleCountryChange(e.target.value)}
-                    className={`mt-1 block w-full px-3 py-2 border ${
-                      errors.country ? "border-red-500" : "border-gray-300"
-                    } rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm`}
-                  >
-                    {countries.map((country, index) => (
-                      <option key={index} value={country}>
-                        {country}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.country && (
-                    <p className="text-red-500 text-sm mt-1">
-                      {errors.country.message}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label
-                    htmlFor="state"
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    State
-                  </label>
-                  <select
-                    id="state"
-                    {...register("state", { required: "State is required" })}
-                    onChange={(e) => handleStateChange(e.target.value)}
-                    className={`mt-1 block w-full px-3 py-2 border ${
-                      errors.state ? "border-red-500" : "border-gray-300"
-                    } rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm`}
-                  >
-                    <option value="">Select State</option>
-                    {states.map((state, index) => (
-                      <option key={index} value={state}>
-                        {state}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.state && (
-                    <p className="text-red-500 text-sm mt-1">
-                      {errors.state.message}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label
-                    htmlFor="district"
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    District
-                  </label>
-                  <select
-                    id="district"
-                    {...register("district", {
-                      required: "District is required",
-                    })}
-                    onChange={(e) =>
-                      handleDistrictChange(e.target.value, watch("state"))
-                    }
-                    className={`mt-1 block w-full px-3 py-2 border ${
-                      errors.district ? "border-red-500" : "border-gray-300"
-                    } rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm`}
-                  >
-                    <option value="">Select District</option>
-                    {districts.map((district, index) => (
-                      <option key={index} value={district}>
-                        {district}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.district && (
-                    <p className="text-red-500 text-sm mt-1">
-                      {errors.district.message}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <label
-                    htmlFor="city"
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    Sub Districts/City
-                  </label>
-                  <select
-                    id="city"
-                    {...register("city", { required: "City is required" })}
-                    className={`mt-1 block w-full px-3 py-2 border ${
-                      errors.city ? "border-red-500" : "border-gray-300"
-                    } rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm`}
-                  >
-                    <option value="">Select City</option>
-                    {cities.map((city, index) => (
-                      <option key={index} value={city}>
-                        {city}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.city && (
-                    <p className="text-red-500 text-sm mt-1">
-                      {errors.city.message}
-                    </p>
-                  )}
-                </div>
+    <div className="w-full flex items-center">
+      {ORDER_STEPS.map((s, i) => {
+        const reached = i <= idx;
+        const isCurrent = i === idx;
+        return (
+          <React.Fragment key={s.key}>
+            <div className="flex flex-col items-center text-center min-w-0 flex-1">
+              <div
+                className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 shadow-md transition-all ${
+                  reached
+                    ? s.key === "CANCELLED"
+                      ? "bg-gray-200 text-gray-600 border-gray-300"
+                      : "bg-gradient-to-br from-red-600 to-orange-500 text-white border-red-600"
+                    : "bg-gray-200 text-gray-500 border-gray-300"
+                } ${isCurrent ? "ring-4 ring-red-200" : ""}`}
+              >
+                {icons[i]}
               </div>
-              <div>
-                <button
-                  type="submit"
-                  disabled={!isValid}
-                  className={`w-full bg-red-500 text-white py-2 px-4 mt-4 rounded-md ${
-                    !isValid
-                      ? "cursor-not-allowed opacity-50"
-                      : "hover:bg-red-600 transition duration-300 ease-in-out transform hover:scale-105"
-                  }`}
-                >
-                  Search
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-
-      {/* show result on pc */}
-
-      {showResult && (
-        <div
-          id="donor-list"
-          className="hidden sm:flex min-h-screen bg-white items-center justify-center p-4"
-        >
-          <div className="bg-white rounded-3xl shadow-2xl max-w-5xl w-full overflow-hidden relative">
-            {/* Header Section */}
-            <div className="bg-gradient-to-r from-red-600 via-red-600 to-red-600 text-white text-center py-8 px-6">
-              <h1 className="text-4xl font-extrabold mb-2">Donors List</h1>
+              <span
+                className={`mt-2 text-[10px] sm:text-xs md:text-sm font-medium leading-tight truncate ${
+                  reached && s.key !== "CANCELLED"
+                    ? "text-red-700"
+                    : "text-gray-600"
+                }`}
+              >
+                {s.label}
+              </span>
             </div>
-
-            {/* Content Section */}
-            <div className="p-0">
-              {/* Loading state */}
-              {isLoading && (
-                <div className="flex justify-center h-34 p-6">
-                  <div className="inline-block text-center">
-                    <div
-                      className="inline-block h-16 w-16 animate-spin rounded-full border-8 border-solid border-red-500 border-r-transparent align-[-0.125em] text-danger motion-reduce:animate-[spin_1.5s_linear_infinite]"
-                      role="status"
-                    >
-                      <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">
-                        Finding Donors...
-                      </span>
-                    </div>
-                    <p className="text-lg text-gray-600 mt-4">Finding Donors...</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Error state */}
-              {!isLoading && isError && (
-                <div className="flex flex-col items-center justify-center h-34 p-6">
-                  <p className="text-red-500 text-lg mb-4">
-                    No users found with the specified details.
-                  </p>
-                  <svg
-                    onClick={() => {
-                      refetch();
-                    }}
-                    className="w-10 h-10 text-red-600 cursor-pointer hover:text-red-500 transition-colors duration-300 transform"
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-              )}
-
-              {/* Donor Table */}
-              {!isLoading && donors && donors.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full border border-gray-300 text-sm text-center shadow-2xl overflow-hidden">
-                    <thead>
-                      <tr className="bg-gradient-to-r from-red-600 via-red-600 to-red-600 text-white">
-                        <th className="px-6 py-4 uppercase font-bold tracking-wider">
-                          #
-                        </th>
-                        <th className="px-6 py-4 uppercase font-bold tracking-wider">
-                          Name
-                        </th>
-                        <th className="px-6 py-4 uppercase font-bold tracking-wider">
-                          Gender
-                        </th>
-                        <th className="px-6 py-4 uppercase font-bold tracking-wider">
-                          Status
-                        </th>
-                        <th className="px-6 py-4 uppercase font-bold tracking-wider">
-                          Mobile
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="text-gray-800">
-                      {donors.map((donor: Donor, index: number) => (
-                        <tr
-                          key={index}
-                          className={`transition duration-300 ${
-                            index % 2 === 0 ? "bg-white" : "bg-gray-50"
-                          } hover:bg-red-50`}
-                        >
-                          <td className="px-6 py-4 font-bold text-red-700 text-base text-center">
-                            {index + 1}
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <div className="inline-flex items-center justify-center">
-                              <span className="font-medium">
-                                {donor.firstName} {donor.lastName}
-                              </span>
-                            </div>
-                          </td>
-
-                          <td className="px-6 py-4 capitalize text-center">
-                            {donor.gender}
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <span
-                              className={`px-3 py-1 text-xs font-bold rounded-full ${
-                                donor.availability
-                                  ? "bg-green-100 text-green-700"
-                                  : "bg-red-100 text-red-700"
-                              }`}
-                            >
-                              {donor.availability ? "Available" : "Unavailable"}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-center">
-                            <a
-                              href={`tel:${donor.mobileNumber}`}
-                              className="text-blue-600 hover:underline font-medium"
-                            >
-                              📞 {donor.mobileNumber}
-                            </a>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* show result on mobile */}
-
-      {showResult && (
-        <div
-          ref={donorListRef}
-          id="donor-list"
-          className="min-h-screen sm:hidden flex items-center justify-center px-4 py-14"
-        >
-          <div className="rounded-3xl shadow-2xl w-full max-w-3xl bg-white/90 backdrop-blur-md overflow-hidden animate-fade-in-up relative border border-red-200">
-            {/* Header Section */}
-            <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-400 text-white text-center py-6 px-4">
-              <h1 className="text-3xl font-extrabold tracking-wide">
-                Donors List
-              </h1>
-              <p className="text-sm font-light mt-1">
-                Real heroes don’t wear capes
-              </p>
-            </div>
-
-            <div className="p-4 space-y-4">
-              {/* Loading State */}
-              {isLoading && (
-                <div className="flex flex-col justify-center items-center py-10">
-                  <div className="animate-spin rounded-full h-10 w-10 border-4 border-red-500 border-t-transparent"></div>
-                  <p className="text-gray-600 text-sm mt-3">
-                    Fetching donors...
-                  </p>
-                </div>
-              )}
-
-              {/* Error State */}
-              {!isLoading && isError && (
-                <div className="text-center text-red-600 font-medium">
-                  No users found with the specified details.
-                </div>
-              )}
-
-              {/* Donor List */}
-              {!isLoading &&
-                donors &&
-                donors.length > 0 &&
-                donors.map((donor: Donor, index: number) => (
-                  <div
-                    key={index}
-                    className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex justify-between items-center transition hover:shadow-lg hover:border-red-300"
-                  >
-                    <div className="flex items-start space-x-3">
-                      <div className="text-sm font-semibold text-red-600">
-                        {index + 1}.
-                      </div>
-                      <div>
-                        <p className="text-base font-semibold text-gray-800">
-                          {donor.firstName} {donor.lastName}
-                        </p>
-                        <p className="text-sm text-gray-500">{donor.gender}</p>
-                        <p className="text-xs mt-1">
-                          {donor.availability ? (
-                            <span className="text-green-600 font-medium">
-                              ✅ Available
-                            </span>
-                          ) : (
-                            <span className="text-red-500 font-medium">
-                              ❌ Not Available
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    <a
-                      href={`tel:${donor.mobileNumber}`}
-                      className="text-blue-600 text-sm font-semibold hover:underline"
-                    >
-                      📞 {donor.mobileNumber}
-                    </a>
-                  </div>
-                ))}
-
-              {/* Fallback for empty list */}
-              {!isLoading && donors && donors.length === 0 && (
-                <div className="text-center text-gray-500 text-lg py-8">
-                  No donors found. Try different criteria.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showPopup && (
-        <div className="fixed z-10 inset-0 overflow-y-auto animate-fade-in">
-          <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div
-              className="fixed inset-0 transition-opacity"
-              aria-hidden="true"
-            >
-              <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-            </div>
-
-            <span
-              className="hidden sm:inline-block sm:align-middle sm:h-screen"
-              aria-hidden="true"
-            >
-              &#8203;
-            </span>
-
-            <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-xl w-full max-w-2xl animate-slide-in">
-              <div className="bg-white px-6 pt-6 pb-4">
-                <div className="sm:flex sm:items-start justify-center sm:justify-start sm:space-x-6">
-                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-16 w-16 rounded-full bg-green-100 sm:mx-0 sm:h-16 sm:w-16">
-                    <FaPhoneAlt className="h-8 w-8 text-green-600" />
-                  </div>
-                  <div className="mt-3 text-center sm:mt-0 sm:text-left sm:w-4/5">
-                    <h3 className="text-2xl leading-6 font-medium text-gray-900">
-                      Mobile Number
-                    </h3>
-                    <div className="mt-3">
-                      <p className="text-lg text-blue-500">
-                        {selectedDonor && showFullNumber ? (
-                          <a
-                            href={`tel:${selectedDonor.mobileNumber}`}
-                            className="hover:underline"
-                          >
-                            {selectedDonor.mobileNumber}
-                          </a>
-                        ) : (
-                          maskedMobile(selectedDonor?.mobileNumber || "")
-                        )}
-                      </p>
-                      {!showFullNumber && (
-                        <form onSubmit={handlePasswordSubmit}>
-                          <div className="mt-4 flex items-center justify-center relative">
-                            <FaLock className="absolute left-3 text-gray-600" />
-                            <input
-                              type="password"
-                              placeholder="Enter password to reveal"
-                              className="block w-full px-4 py-2 pl-10 pr-4 border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-600 sm:text-sm"
-                              value={password}
-                              onChange={(e) => setPassword(e.target.value)}
-                            />
-                          </div>
-                        </form>
-                      )}
-                      {popupMessage && (
-                        <p className="mt-2 text-sm text-red-500">
-                          {popupMessage}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="bg-gray-50 px-4 py-3 sm:px-6 flex justify-center sm:justify-end space-x-6">
-                {!showFullNumber && (
-                  <button
-                    type="submit"
-                    className="px-6 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-transform duration-300 transform hover:scale-105"
-                    onClick={handlePasswordSubmit}
-                  >
-                    Submit
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowPopup(false)}
-                  className="bg-gray-500 text-white px-6 py-2 rounded-lg shadow-sm text-sm font-medium hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-transform duration-300 transform hover:scale-105"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+            {i < ORDER_STEPS.length - 1 && (
+              <div
+                className={`h-1 flex-1 mx-1 sm:mx-2 rounded-full self-center ${
+                  i < idx && status !== "CANCELLED"
+                    ? "bg-gradient-to-r from-red-600 to-orange-500"
+                    : "bg-gray-300"
+                }`}
+              />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
   );
 };
 
-export default Dashboard;
+// ---- Small sub-components ----
+const PickupEditor: React.FC<{
+  onSave: (start: string, end: string) => void;
+  onCancel: () => void;
+}> = ({ onSave, onCancel }) => {
+  const [start, setStart] = useState<string>(
+    new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16)
+  );
+  const [end, setEnd] = useState<string>(
+    new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().slice(0, 16)
+  );
+
+  return (
+    <div className="mt-4 grid sm:grid-cols-3 gap-3">
+      <div className="text-sm">
+        <label className="block text-xs text-gray-600 mb-1">Start</label>
+        <input
+          type="datetime-local"
+          value={start}
+          onChange={(e) => setStart(e.target.value)}
+          className="w-full rounded-lg border px-3 py-2"
+        />
+      </div>
+      <div className="text-sm">
+        <label className="block text-xs text-gray-600 mb-1">End</label>
+        <input
+          type="datetime-local"
+          value={end}
+          onChange={(e) => setEnd(e.target.value)}
+          className="w-full rounded-lg border px-3 py-2"
+        />
+      </div>
+      <div className="flex items-end gap-2">
+        <button
+          onClick={() =>
+            onSave(new Date(start).toISOString(), new Date(end).toISOString())
+          }
+          className="rounded-full bg-red-600 text-white px-4 py-2 text-sm font-semibold hover:bg-red-700"
+        >
+          Save
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-full bg-gray-200 px-4 py-2 text-sm font-semibold hover:bg-gray-300"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const AddNote: React.FC<{ onAdd: (msg: string) => void }> = ({ onAdd }) => {
+  const [msg, setMsg] = useState("");
+  return (
+    <div className="flex gap-2">
+      <input
+        value={msg}
+        onChange={(e) => setMsg(e.target.value)}
+        placeholder="Add internal note or activity…"
+        className="flex-1 rounded-xl border px-3 py-2 text-sm"
+      />
+      <button
+        onClick={() => {
+          if (!msg.trim()) return;
+          onAdd(msg.trim());
+          setMsg("");
+        }}
+        className="rounded-full bg-red-600 text-white px-4 py-2 text-sm font-semibold hover:bg-red-700"
+      >
+        Add
+      </button>
+    </div>
+  );
+};
+
+const CancelForm: React.FC<{ onCancel: (reason: string) => void }> = ({
+  onCancel,
+}) => {
+  const [reason, setReason] = useState("");
+  return (
+    <div>
+      <textarea
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        className="w-full rounded-xl border px-3 py-2 text-sm min-h-[100px]"
+        placeholder="Reason for cancellation"
+      />
+      <div className="mt-3 flex justify-end gap-2">
+        <button
+          onClick={() => onCancel(reason || "No reason provided")}
+          className="rounded-full bg-gray-200 px-4 py-2 text-sm font-semibold hover:bg-gray-300"
+        >
+          Confirm Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ---- Small order card for list view ----
+const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
+  order,
+  onOpen,
+}) => {
+  const totalItems = order.items.length;
+  return (
+    <div className="rounded-2xl border border-red-100 bg-white p-5 flex flex-col gap-4 shadow-sm hover:shadow-xl hover:border-red-200 transition-all duration-300">
+      {/* Top Row: ID + Status */}
+      <div className="flex items-center justify-between">
+        <div className="font-mono text-sm sm:text-base font-semibold text-gray-800">
+          #{order.id}
+        </div>
+        <StatusBadge status={order.status} />
+      </div>
+
+      {/* Patient + Placed Info */}
+      <div>
+        <div className="text-base font-semibold text-gray-900">
+          {order.patient.name}
+        </div>
+        <div className="text-xs text-gray-500 mt-0.5">
+          Placed on{" "}
+          <span className="font-medium text-gray-600">
+            {new Date(order.placedAt).toLocaleString("en-IN", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true,
+              timeZone: "Asia/Kolkata",
+            })}
+          </span>
+        </div>
+      </div>
+
+      {/* Footer: Items + Total + Action */}
+      <div className="flex items-center justify-between text-sm sm:text-base">
+        <span className="text-gray-700">
+          {totalItems} {totalItems > 1 ? "items" : "item"} •{" "}
+          <span className="font-semibold text-gray-900">₹{order.total}</span>
+        </span>
+        <button
+          onClick={onOpen}
+          className="rounded-full bg-gradient-to-r from-red-600 to-red-500 text-white px-4 py-1.5 text-xs sm:text-sm font-semibold shadow-md hover:shadow-lg hover:from-red-700 hover:to-red-600 transition-all"
+        >
+          Open
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ---- Main component ----
+const MerchantOrderManager: React.FC = () => {
+  // MULTI-ORDER: list -> click to open detail
+  const [orders, setOrders] = useState<Order[]>([MOCK_ORDER, MOCK_ORDER_B]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // detail view local toggles
+  const [editPickup, setEditPickup] = useState(false);
+  const [editPayment, setEditPayment] = useState(false);
+  const [reportFileNameByOrder, setReportFileNameByOrder] = useState<
+    Record<string, string | undefined>
+  >({});
+  const [showCancel, setShowCancel] = useState(false);
+
+  // -------- NEW: list filters/sort/search (kept to your visual style) --------
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | "ALL">("ALL");
+  const [sortKey, setSortKey] = useState<"placedAt" | "total">("placedAt");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  const order = useMemo(
+    () => orders.find((o) => o.id === selectedId) ?? null,
+    [orders, selectedId]
+  );
+
+  const updateOrder = (mutator: (o: Order) => Order) =>
+    setOrders((prev) =>
+      prev.map((o) => (o.id === selectedId ? mutator(o) : o))
+    );
+
+  const pushActivity = (msg: string) => {
+    if (!order) return;
+    updateOrder((o) => ({
+      ...o,
+      activity: [{ ts: new Date().toISOString(), message: msg }, ...o.activity],
+    }));
+  };
+
+  const updateStatus = (s: OrderStatus) => {
+    if (!order) return;
+    updateOrder((o) => ({ ...o, status: s }));
+    pushActivity(`Status updated to ${humanize(s)}`);
+  };
+
+  const assignPhleb = (p: Phlebotomist) => {
+    if (!order) return;
+    updateOrder((o) => ({ ...o, phlebotomist: p }));
+    pushActivity(`Phlebotomist assigned: ${p.name}`);
+  };
+
+  const markPaid = () => {
+    if (!order) return;
+    updateOrder((o) => ({
+      ...o,
+      payment: { ...o.payment, status: "Paid", txnId: `TXN-${Date.now()}` },
+    }));
+    pushActivity("Payment marked as Paid");
+  };
+
+  const uploadReport = (file: File) => {
+    if (!order) return;
+    const fakeUrl = URL.createObjectURL(file); // demo
+    updateOrder((o) => ({ ...o, reportUrl: fakeUrl }));
+    setReportFileNameByOrder((m) => ({ ...m, [order.id]: file.name }));
+    if (order.status === "IN_PROGRESS") updateStatus("REPORT_READY");
+    pushActivity(`Report uploaded: ${file.name}`);
+  };
+
+  const savePickupWindow = (start: string, end: string) => {
+    if (!order) return;
+    updateOrder((o) => ({ ...o, pickupWindow: { start, end } }));
+    pushActivity(
+      `Pickup window set: ${new Date(start).toLocaleString()} - ${new Date(
+        end
+      ).toLocaleString()}`
+    );
+    setEditPickup(false);
+  };
+
+  const cancelOrder = (reason: string) => {
+    if (!order) return;
+
+    // Prevent cancelling terminal states
+    if (order.status === "COMPLETED") {
+      pushActivity(`Cancel attempted but blocked: Order already Completed.`);
+      setShowCancel(false);
+      return;
+    }
+    if (order.status === "CANCELLED") {
+      setShowCancel(false);
+      return;
+    }
+
+    updateOrder((o) => {
+      const paymentNext: Payment =
+        o.payment.status === "Paid"
+          ? { ...o.payment, status: "Refunded" }
+          : o.payment; // keep Pending if not paid
+      return {
+        ...o,
+        status: "CANCELLED",
+        payment: paymentNext,
+        phlebotomist: undefined,
+      };
+    });
+
+    pushActivity(`Order cancelled. Reason: ${reason}`);
+    setShowCancel(false);
+  };
+
+  const nextStatus: OrderStatus | null = useMemo(() => {
+    if (!order) return null;
+    const i = STATUS_INDEX[order.status];
+    return ORDER_STEPS[i + 1]?.key ?? null;
+  }, [order?.status]);
+
+  const totals = useMemo(() => {
+    if (!order) return null;
+    return {
+      subtotal: order.subtotal,
+      discount: order.discount,
+      deliveryFee: order.deliveryFee,
+      total: order.total,
+    };
+  }, [order]);
+
+  // demo phlebotomists list
+  const PHLEBS: Phlebotomist[] = [
+    { id: "p1", name: "Rohit Kulkarni", phone: "+91 98XXXXXX01" },
+    { id: "p2", name: "Sneha Iyer", phone: "+91 98XXXXXX02" },
+    { id: "p3", name: "Manish Gupta", phone: "+91 98XXXXXX03" },
+  ];
+
+  // -------- NEW: derive visible orders by filters/sort/search --------
+  const visibleOrders = useMemo(() => {
+    const q = query.trim().toLowerCase();
+
+    let list = orders.filter((o) => {
+      const inStatus = statusFilter === "ALL" || o.status === statusFilter;
+      const hit =
+        !q ||
+        o.id.toLowerCase().includes(q) ||
+        o.patient.name.toLowerCase().includes(q) ||
+        o.patient.phone.toLowerCase().includes(q) ||
+        o.labName.toLowerCase().includes(q);
+      return inStatus && hit;
+    });
+
+    list.sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      if (sortKey === "placedAt") {
+        return (
+          (new Date(a.placedAt).getTime() - new Date(b.placedAt).getTime()) *
+          dir
+        );
+      }
+      return (a.total - b.total) * dir;
+    });
+
+    return list;
+  }, [orders, query, statusFilter, sortKey, sortDir]);
+
+  return (
+    <div
+      className="min-h-screen flex items-center justify-center p-0 sm:p-6 bg-white"
+      style={{ paddingTop: "4rem", paddingBottom: "10rem" }}
+    >
+      <div className="bg-white/80 backdrop-blur rounded-2xl shadow-xl max-w-6xl w-full overflow-hidden relative ring-1 ring-red-100">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-400 text-white py-5 px-4 sm:px-6 shadow-md relative after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-white/40">
+          <div className="flex items-center justify-between">
+            {/* Back Button */}
+            <button
+              className="p-2 bg-red-600 text-white rounded-full shadow-md hover:bg-red-700 transition"
+              aria-label="Back"
+              onClick={() => {
+                setSelectedId(null);
+                setEditPickup(false);
+                setEditPayment(false);
+              }}
+              title={selectedId ? "Back to Orders" : "Back"}
+            >
+              <FaArrowLeft size={18} />
+            </button>
+
+            {/* Heading with Total Orders */}
+            <div className="flex flex-col items-center text-center">
+              <h1 className="text-2xl sm:text-3xl font-extrabold">
+                {selectedId ? "Order" : "Orders"}
+              </h1>
+              {!selectedId && (
+                <span className="text-lg sm:text-xl font-medium text-white mt-1">
+                  Total Orders{" "}
+                  <span className="font-bold text-yellow-300">
+                    {orders.length}
+                  </span>
+                </span>
+              )}
+            </div>
+
+            {/* Right-side buttons */}
+            <div className="flex gap-2 sm:gap-3">
+              {selectedId && (
+                <>
+                  <button
+                    className="px-3 sm:px-4 py-2 bg-red-600 rounded-full shadow hover:bg-red-700 flex items-center"
+                    onClick={() => window.print()}
+                  >
+                    <FaPrint className="mr-2" /> Print
+                  </button>
+                  <button
+                    className="px-3 sm:px-4 py-2 bg-red-600 rounded-full shadow hover:bg-red-700 flex items-center"
+                    onClick={() => alert("Saved (demo)")}
+                  >
+                    <FaSave className="mr-2" /> Save
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Order details (when selectedId is true) */}
+          {selectedId && order && (
+            <div className="mt-3 w-full flex flex-wrap items-center gap-3 justify-center text-center">
+              <div className="text-lg sm:text-xl font-medium text-white">
+                Order ID{" "}
+                <span className="font-mono font-bold text-yellow-300">
+                  {order.id}
+                </span>
+              </div>
+              <div className="text-lg sm:text-xl font-medium text-white">
+                Placed{" "}
+                <span className="font-bold text-yellow-300">
+                  {new Date(order.placedAt).toLocaleString("en-IN", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true,
+                    timeZone: "Asia/Kolkata",
+                  })}
+                </span>
+              </div>
+              <div className="text-lg sm:text-xl font-medium text-white">
+                Lab{" "}
+                <span className="font-bold text-yellow-300">
+                  {order.labName}
+                </span>
+              </div>
+              <div className="text-lg sm:text-xl font-medium text-white">
+                Status <StatusBadge status={order.status} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Decorative sheen */}
+        <div className="h-1 w-full bg-gradient-to-r from-transparent via-white/60 to-transparent" />
+
+        {/* CONTENT */}
+        {!orders.length && (
+          <div className="p-12 text-center">
+            <div className="text-3xl mb-2">😌 No orders right now</div>
+            <div className="text-gray-600">New orders will appear here.</div>
+          </div>
+        )}
+
+        {/* List view (small cards) */}
+        {!selectedId && orders.length > 0 && (
+          <div className="p-4 sm:p-6">
+            {/* -------- Toolbar -------- */}
+            <div className="mb-6 rounded-2xl border border-red-100 bg-gradient-to-r from-white/80 to-red-50/60 backdrop-blur-lg shadow-sm p-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              {/* Left: Search + filters */}
+              <div className="flex-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                {/* Search */}
+                <div className="relative w-full sm:flex-1">
+                  <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="🔎 Search by ID, name, phone, lab…"
+                    className="w-full pl-9 pr-4 py-2.5 rounded-full border bg-white/90 border-gray-200 text-sm focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
+                  />
+                </div>
+
+                {/* Filter */}
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <FaFilter className="text-gray-400 hidden sm:block" />
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as any)}
+                    className="w-full sm:w-auto rounded-lg border bg-white/90 border-gray-200 text-sm px-3 py-2 focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
+                    title="Filter by status"
+                  >
+                    <option value="ALL">All</option>
+                    {ORDER_STEPS.map((s) => (
+                      <option key={s.key} value={s.key}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Sort */}
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <FaSort className="text-gray-400 hidden sm:block" />
+                  <select
+                    value={`${sortKey}:${sortDir}`}
+                    onChange={(e) => {
+                      const [k, d] = e.target.value.split(":") as any;
+                      setSortKey(k);
+                      setSortDir(d);
+                    }}
+                    className="w-full sm:w-auto rounded-lg border bg-white/90 border-gray-200 text-sm px-3 py-2 focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
+                    title="Sort"
+                  >
+                    <option value="placedAt:desc">Newest</option>
+                    <option value="placedAt:asc">Oldest</option>
+                    <option value="total:desc">Amount (high→low)</option>
+                    <option value="total:asc">Amount (low→high)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Right: Count */}
+              <div className="text-xs sm:text-sm text-gray-600 text-center sm:text-right">
+                Showing{" "}
+                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
+                  {visibleOrders.length}
+                </span>
+                of{" "}
+                <span className="font-semibold text-gray-700">
+                  {orders.length}
+                </span>
+              </div>
+            </div>
+            {/* -------- /Toolbar -------- */}
+
+            {visibleOrders.length === 0 ? (
+              <div className="py-12 text-center text-sm text-gray-500">
+                No results found. Try adjusting your search or filters.
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {visibleOrders.map((o) => (
+                  <OrderCard
+                    key={o.id}
+                    order={o}
+                    onOpen={() => setSelectedId(o.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Detail view */}
+        {selectedId && order && totals && (
+          <div className="p-4 sm:p-6 space-y-6">
+            {/* Stepper */}
+            <SectionCard
+              title={
+                <span className="flex items-center gap-2">
+                  <FaClipboard /> Order Progress
+                </span>
+              }
+            >
+              <Stepper status={order.status} />
+              <div className="mt-4 flex flex-wrap gap-2">
+                {nextStatus && order.status !== "CANCELLED" && (
+                  <button
+                    onClick={() => updateStatus(nextStatus)}
+                    className="rounded-full bg-red-600 px-4 py-2 text-white font-semibold shadow hover:bg-red-700"
+                  >
+                    Move to: {humanize(nextStatus)}
+                  </button>
+                )}
+                {order.status === "REPORT_READY" && (
+                  <button
+                    onClick={() => updateStatus("COMPLETED")}
+                    className="rounded-full bg-green-600 px-4 py-2 text-white font-semibold shadow hover:bg-green-700"
+                  >
+                    Mark Completed
+                  </button>
+                )}
+                {/* Cancel button removed from here */}
+              </div>
+            </SectionCard>
+
+            {/* Left/Right grid */}
+            <div className="grid lg:grid-cols-3 gap-6">
+              {/* Left column */}
+              <div className="lg:col-span-2 space-y-6">
+                {/* Patient & Contact */}
+                <SectionCard
+                  title={
+                    <span className="flex items-center gap-2">
+                      <FaUser /> Patient
+                    </span>
+                  }
+                  right={<StatusBadge status={order.status} />}
+                >
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <div className="font-semibold text-gray-800">
+                        {order.patient.name} {pill(`${order.patient.age} yrs`)}
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        {order.patient.gender}
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <FaPhone className="mt-1" />
+                      <div className="text-sm">
+                        <div>{order.patient.phone}</div>
+                        {order.patient.email && (
+                          <div className="truncate">{order.patient.email}</div>
+                        )}
+                        <div className="mt-2 flex gap-2">
+                          <button className="rounded-full border px-3 py-1 text-xs flex items-center gap-2 hover:bg-red-50">
+                            <FaWhatsapp /> WhatsApp
+                          </button>
+                          <button className="rounded-full border px-3 py-1 text-xs flex items-center gap-2 hover:bg-red-50">
+                            <FaEnvelope /> Email
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </SectionCard>
+
+                {/* Address & Pickup */}
+                <SectionCard
+                  title={
+                    <span className="flex items-center gap-2">
+                      <FaMapMarkerAlt /> Address & Pickup
+                    </span>
+                  }
+                  right={
+                    order.status !== "CANCELLED" && (
+                      <button
+                        onClick={() => setEditPickup((v) => !v)}
+                        className="rounded-full bg-red-600 text-white px-3 py-1 text-xs font-semibold flex items-center gap-2 hover:bg-red-700"
+                      >
+                        <FaEdit /> {editPickup ? "Close" : "Edit"}
+                      </button>
+                    )
+                  }
+                >
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="text-sm">
+                      <div className="font-semibold">
+                        Delivery / Collection Address
+                      </div>
+                      <div>{order.address.line1}</div>
+                      {order.address.line2 && <div>{order.address.line2}</div>}
+                      <div>
+                        {order.address.city}, {order.address.state} -{" "}
+                        {order.address.pincode}
+                      </div>
+                    </div>
+                    <div className="text-sm">
+                      <div className="font-semibold flex items-center gap-2">
+                        <FaClock /> Sample Pickup Window
+                      </div>
+                      {order.pickupWindow ? (
+                        <div className="mt-1">
+                          {new Date(order.pickupWindow.start).toLocaleString()}{" "}
+                          — {new Date(order.pickupWindow.end).toLocaleString()}
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-gray-500">Not set</div>
+                      )}
+                    </div>
+                  </div>
+                  {editPickup && order.status !== "CANCELLED" && (
+                    <PickupEditor
+                      onSave={savePickupWindow}
+                      onCancel={() => setEditPickup(false)}
+                    />
+                  )}
+                </SectionCard>
+
+                {/* Items */}
+                <SectionCard
+                  title={
+                    <span className="flex items-center gap-2">
+                      <FaFlask /> Items in Order
+                    </span>
+                  }
+                >
+                  <div className="overflow-x-auto rounded-xl border border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gradient-to-r from-red-50 to-red-100 text-red-700">
+                          <th className="px-5 py-3 text-left font-semibold">
+                            Name
+                          </th>
+                          <th className="px-5 py-3 text-left font-semibold">
+                            Type
+                          </th>
+                          <th className="px-5 py-3 text-right font-semibold">
+                            Price
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {order.items.map((it, idx) => (
+                          <tr
+                            key={`${it.type}-${it.id}-${idx}`}
+                            className={
+                              idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                            }
+                          >
+                            <td className="px-5 py-3 font-medium text-gray-800">
+                              {it.name}
+                            </td>
+                            <td className="px-5 py-3">{pill(it.type)}</td>
+                            <td className="px-5 py-3 text-right font-bold text-red-600">
+                              ₹{it.price}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </SectionCard>
+
+                {/* Activity Log */}
+                <SectionCard
+                  title={
+                    <span className="flex items-center gap-2">
+                      <FaTruck /> Activity
+                    </span>
+                  }
+                >
+                  <div className="space-y-3">
+                    <AddNote onAdd={(msg) => pushActivity(msg)} />
+                    <ul className="divide-y divide-red-100 border border-red-100 rounded-xl overflow-hidden">
+                      {order.activity.map((a, i) => (
+                        <li
+                          key={i}
+                          className="px-4 py-3 bg-white hover:bg-red-50 transition"
+                        >
+                          <div className="text-xs text-gray-500">
+                            {new Date(a.ts).toLocaleString()}
+                          </div>
+                          <div className="text-sm text-gray-800">
+                            {a.message}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </SectionCard>
+              </div>
+
+              {/* Right column */}
+              <div className="space-y-6">
+                {/* Assign Phlebotomist */}
+                <SectionCard
+                  title={
+                    <span className="flex items-center gap-2">
+                      <FaUserMd /> Assign Phlebotomist
+                    </span>
+                  }
+                >
+                  {order.phlebotomist ? (
+                    <div className="flex items-start justify-between">
+                      <div className="text-sm">
+                        <div className="font-semibold">
+                          {order.phlebotomist.name}
+                        </div>
+                        <div className="text-gray-600">
+                          {order.phlebotomist.phone}
+                        </div>
+                      </div>
+                      {order.status !== "CANCELLED" && (
+                        <button
+                          className="rounded-full border px-3 py-1 text-xs hover:bg-red-50"
+                          onClick={() =>
+                            updateOrder((o) => ({
+                              ...o,
+                              phlebotomist: undefined,
+                            }))
+                          }
+                        >
+                          Change
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid gap-2">
+                      {PHLEBS.map((p) => (
+                        <button
+                          key={p.id}
+                          className="rounded-xl border px-3 py-2 text-left hover:bg-red-50 disabled:opacity-50"
+                          onClick={() => assignPhleb(p)}
+                          disabled={order.status === "CANCELLED"}
+                        >
+                          <div className="text-sm font-semibold">{p.name}</div>
+                          <div className="text-xs text-gray-600">{p.phone}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </SectionCard>
+
+                {/* Payment */}
+                <SectionCard
+                  title={
+                    <span className="flex items-center gap-2">
+                      <FaFileAlt /> Payment
+                    </span>
+                  }
+                  right={
+                    order.status !== "CANCELLED" && (
+                      <button
+                        onClick={() => setEditPayment((v) => !v)}
+                        className="rounded-full bg-red-600 text-white px-3 py-1 text-xs font-semibold flex items-center gap-2 hover:bg-red-700"
+                      >
+                        <FaEdit /> {editPayment ? "Close" : "Edit"}
+                      </button>
+                    )
+                  }
+                >
+                  <div className="text-sm space-y-1">
+                    <div>
+                      Method:{" "}
+                      <span className="font-semibold">
+                        {order.payment.method}
+                      </span>
+                    </div>
+                    <div>
+                      Status:{" "}
+                      {pill(
+                        order.payment.status,
+                        order.payment.status === "Paid"
+                          ? "bg-green-50 text-green-700 border-green-200"
+                          : order.payment.status === "Refunded"
+                          ? "bg-gray-50 text-gray-700 border-gray-200"
+                          : "bg-amber-50 text-amber-700 border-amber-200"
+                      )}
+                    </div>
+                    {order.payment.txnId && (
+                      <div>
+                        Txn ID:{" "}
+                        <span className="font-mono">{order.payment.txnId}</span>
+                      </div>
+                    )}
+                  </div>
+                  {editPayment && order.status !== "CANCELLED" && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        onClick={markPaid}
+                        className="rounded-full bg-green-600 text-white px-4 py-2 text-sm font-semibold hover:bg-green-700"
+                      >
+                        Mark Paid
+                      </button>
+                      <button
+                        onClick={() =>
+                          updateOrder((o) => ({
+                            ...o,
+                            payment: { ...o.payment, status: "Refunded" },
+                          }))
+                        }
+                        className="rounded-full bg-gray-200 px-4 py-2 text-sm font-semibold hover:bg-gray-300"
+                      >
+                        Mark Refunded
+                      </button>
+                    </div>
+                  )}
+                </SectionCard>
+
+                {/* Upload Report */}
+                <SectionCard
+                  title={
+                    <span className="flex items-center gap-2">
+                      <FaPaperclip /> Upload Report
+                    </span>
+                  }
+                >
+                  {order.status === "CANCELLED" ? (
+                    <div className="text-sm text-gray-600">
+                      Order is cancelled. Uploads are disabled.
+                    </div>
+                  ) : order.reportUrl ? (
+                    <div className="text-sm">
+                      <div className="mb-2">
+                        Uploaded:{" "}
+                        <span className="font-semibold">
+                          {reportFileNameByOrder[order.id] ?? "report.pdf"}
+                        </span>
+                      </div>
+                      <a
+                        className="underline text-red-600"
+                        href={order.reportUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open report
+                      </a>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          className="rounded-full border px-3 py-1 text-xs hover:bg-red-50"
+                          onClick={() =>
+                            updateOrder((o) => ({ ...o, reportUrl: undefined }))
+                          }
+                        >
+                          Replace
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-red-200 rounded-xl p-6 cursor-pointer hover:bg-red-50">
+                      <input
+                        type="file"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) uploadReport(f);
+                        }}
+                      />
+                      <div className="text-sm text-gray-700">
+                        Drag & drop or click to upload PDF/Image
+                      </div>
+                    </label>
+                  )}
+                </SectionCard>
+
+                {/* Totals */}
+                <SectionCard
+                  title={
+                    <span className="flex items-center gap-2">
+                      <FaCheckCircle /> Summary
+                    </span>
+                  }
+                >
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span>Subtotal</span>
+                      <span className="font-semibold">₹{totals.subtotal}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Discount</span>
+                      <span className="font-semibold text-green-700">
+                        -₹{totals.discount}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Collection/Delivery</span>
+                      <span className="font-semibold">
+                        ₹{totals.deliveryFee}
+                      </span>
+                    </div>
+                    <div className="h-px bg-gray-200" />
+                    <div className="flex justify-between text-lg font-extrabold">
+                      <span>Total</span>
+                      <span className="text-red-600">₹{totals.total}</span>
+                    </div>
+                  </div>
+                </SectionCard>
+
+                {/* Customer Instructions */}
+                {order.instructions && (
+                  <SectionCard
+                    title={
+                      <span className="flex items-center gap-2">
+                        <FaEdit /> Customer Instructions
+                      </span>
+                    }
+                  >
+                    <div className="text-sm text-gray-700 whitespace-pre-wrap">
+                      {order.instructions}
+                    </div>
+                  </SectionCard>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Screen-level floating quick actions — ONLY in detail view */}
+      {selectedId && order && (
+        <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-[1000] w-full max-w-xs sm:max-w-md px-3">
+          <div className="bg-white/85 backdrop-blur shadow-lg ring-1 ring-red-100 rounded-full px-2 py-1.5 flex gap-2 justify-center">
+            {nextStatus && order.status !== "CANCELLED" && (
+              <button
+                onClick={() => updateStatus(nextStatus)}
+                className="flex-1 rounded-full bg-red-600 text-white 
+                     px-3 sm:px-4 py-1.5 sm:py-2 
+                     text-xs sm:text-sm font-medium 
+                     shadow hover:bg-red-700 transition"
+              >
+                Next: {humanize(nextStatus)}
+              </button>
+            )}
+
+            {order.status === "REPORT_READY" && (
+              <button
+                onClick={() => updateStatus("COMPLETED")}
+                className="flex-1 rounded-full bg-green-600 text-white 
+                     px-3 sm:px-4 py-1.5 sm:py-2 
+                     text-xs sm:text-sm font-medium 
+                     shadow hover:bg-green-700 transition"
+              >
+                Complete
+              </button>
+            )}
+
+            {order.status !== "COMPLETED" && order.status !== "CANCELLED" && (
+              <button
+                onClick={() => setShowCancel(true)}
+                className="flex-1 rounded-full bg-white text-red-700 
+                     px-3 sm:px-4 py-1.5 sm:py-2 
+                     text-xs sm:text-sm font-medium 
+                     shadow-inner ring-1 ring-red-200 
+                     hover:bg-red-50 transition"
+                title="Cancel this order"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Cancel modal */}
+      {showCancel && order && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[1100] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative">
+            <button
+              className="absolute top-4 right-4 p-2 rounded-full bg-red-100 hover:bg-red-200"
+              onClick={() => setShowCancel(false)}
+              aria-label="Close"
+            >
+              <FaTimes />
+            </button>
+            <h3 className="text-xl font-bold text-red-700 mb-2">
+              Cancel Order
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Add a brief reason to keep the audit trail clean.
+            </p>
+            <CancelForm onCancel={(r) => cancelOrder(r)} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default MerchantOrderManager;
