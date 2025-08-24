@@ -203,7 +203,7 @@ const Header: React.FC = () => {
               {
                 to: "/dashboard",
                 icon: <FaSearch className="mr-2 text-xl" />,
-                label: "Find Donors",
+                label: "Dashboard",
               },
               {
                 to: "/blogs",

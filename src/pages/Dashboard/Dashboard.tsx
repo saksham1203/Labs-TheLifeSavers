@@ -174,6 +174,23 @@ const pill = (text: string, cls = "bg-red-100 text-red-700 border-red-200") => (
 
 const humanize = (s: string) => s.replace(/_/g, " ");
 
+function formatDateTimeIST(date: string | Date): string {
+  const d = new Date(date);
+  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+  const ist = new Date(utc + 5.5 * 60 * 60 * 1000);
+
+  const dd = String(ist.getDate()).padStart(2, "0");
+  const mm = String(ist.getMonth() + 1).padStart(2, "0");
+  const yyyy = ist.getFullYear();
+
+  let hours = ist.getHours();
+  const minutes = String(ist.getMinutes()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+
+  return `${dd}/${mm}/${yyyy}, ${hours}:${minutes} ${ampm}`;
+}
+
 interface SectionCardProps {
   title: ReactNode;
   right?: ReactNode;
@@ -394,15 +411,7 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
         <div className="text-xs text-gray-500 mt-0.5">
           Placed on{" "}
           <span className="font-medium text-gray-600">
-            {new Date(order.placedAt).toLocaleString("en-IN", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: true,
-              timeZone: "Asia/Kolkata",
-            })}
+            {formatDateTimeIST(order.placedAt)}
           </span>
         </div>
       </div>
@@ -496,9 +505,9 @@ const MerchantOrderManager: React.FC = () => {
     if (!order) return;
     updateOrder((o) => ({ ...o, pickupWindow: { start, end } }));
     pushActivity(
-      `Pickup window set: ${new Date(start).toLocaleString()} - ${new Date(
+      `Pickup window set: ${formatDateTimeIST(start)} - ${formatDateTimeIST(
         end
-      ).toLocaleString()}`
+      )}`
     );
     setEditPickup(false);
   };
@@ -657,15 +666,7 @@ const MerchantOrderManager: React.FC = () => {
               <div className="text-lg sm:text-xl font-medium text-white">
                 Placed{" "}
                 <span className="font-bold text-yellow-300">
-                  {new Date(order.placedAt).toLocaleString("en-IN", {
-                    day: "2-digit",
-                    month: "2-digit",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                    timeZone: "Asia/Kolkata",
-                  })}
+                  {formatDateTimeIST(order.placedAt)}
                 </span>
               </div>
               <div className="text-lg sm:text-xl font-medium text-white">
@@ -892,8 +893,8 @@ const MerchantOrderManager: React.FC = () => {
                       </div>
                       {order.pickupWindow ? (
                         <div className="mt-1">
-                          {new Date(order.pickupWindow.start).toLocaleString()}{" "}
-                          — {new Date(order.pickupWindow.end).toLocaleString()}
+                          {formatDateTimeIST(order.pickupWindow.start)} —{" "}
+                          {formatDateTimeIST(order.pickupWindow.end)}
                         </div>
                       ) : (
                         <div className="mt-1 text-gray-500">Not set</div>
@@ -970,7 +971,7 @@ const MerchantOrderManager: React.FC = () => {
                           className="px-4 py-3 bg-white hover:bg-red-50 transition"
                         >
                           <div className="text-xs text-gray-500">
-                            {new Date(a.ts).toLocaleString()}
+                            {formatDateTimeIST(a.ts)}
                           </div>
                           <div className="text-sm text-gray-800">
                             {a.message}
