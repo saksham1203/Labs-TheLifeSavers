@@ -43,10 +43,6 @@ const ORDER_STEPS: { key: OrderStatus; label: string }[] = [
   { key: "CANCELLED", label: "Cancelled" },
 ];
 
-const STATUS_INDEX: Record<OrderStatus, number> = ORDER_STEPS.reduce(
-  (acc, s, idx) => ((acc[s.key] = idx), acc),
-  {} as Record<OrderStatus, number>
-);
 
 // ---- Additional merchant-side types ----
 interface Address {
@@ -241,37 +237,45 @@ const icons = [
 ];
 
 const Stepper: React.FC<{ status: OrderStatus }> = ({ status }) => {
-  const idx = STATUS_INDEX[status];
+  // If cancelled, render a track that excludes "Completed"
+  const steps =
+    status === "CANCELLED"
+      ? ORDER_STEPS.filter((s) => s.key !== "COMPLETED") // Placed → … → Cancelled
+      : ORDER_STEPS.filter((s) => s.key !== "CANCELLED"); // Placed → … → Completed
+
+  const idx = steps.findIndex((s) => s.key === status);
+
   return (
     <div className="w-full flex items-center">
-      {ORDER_STEPS.map((s, i) => {
+      {steps.map((s, i) => {
         const reached = i <= idx;
         const isCurrent = i === idx;
+        const isCancelled = s.key === "CANCELLED";
+
         return (
           <React.Fragment key={s.key}>
             <div className="flex flex-col items-center text-center min-w-0 flex-1">
               <div
                 className={`flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 shadow-md transition-all ${
                   reached
-                    ? s.key === "CANCELLED"
+                    ? isCancelled
                       ? "bg-gray-200 text-gray-600 border-gray-300"
                       : "bg-gradient-to-br from-red-600 to-orange-500 text-white border-red-600"
                     : "bg-gray-200 text-gray-500 border-gray-300"
                 } ${isCurrent ? "ring-4 ring-red-200" : ""}`}
               >
-                {icons[i]}
+                {icons[ORDER_STEPS.findIndex((os) => os.key === s.key)]}
               </div>
               <span
                 className={`mt-2 text-[10px] sm:text-xs md:text-sm font-medium leading-tight truncate ${
-                  reached && s.key !== "CANCELLED"
-                    ? "text-red-700"
-                    : "text-gray-600"
+                  reached && !isCancelled ? "text-red-700" : "text-gray-600"
                 }`}
               >
                 {s.label}
               </span>
             </div>
-            {i < ORDER_STEPS.length - 1 && (
+
+            {i < steps.length - 1 && (
               <div
                 className={`h-1 flex-1 mx-1 sm:mx-2 rounded-full self-center ${
                   i < idx && status !== "CANCELLED"
@@ -286,6 +290,7 @@ const Stepper: React.FC<{ status: OrderStatus }> = ({ status }) => {
     </div>
   );
 };
+
 
 // ---- Small sub-components ----
 const PickupEditor: React.FC<{
@@ -543,11 +548,25 @@ const MerchantOrderManager: React.FC = () => {
     setShowCancel(false);
   };
 
-  const nextStatus: OrderStatus | null = useMemo(() => {
-    if (!order) return null;
-    const i = STATUS_INDEX[order.status];
-    return ORDER_STEPS[i + 1]?.key ?? null;
-  }, [order?.status]);
+// steps that participate in the normal forward flow (no CANCELLED)
+const FLOW_STEPS: { key: OrderStatus; label: string }[] = ORDER_STEPS.filter(
+  (s) => s.key !== "CANCELLED"
+);
+
+const FLOW_INDEX: Record<OrderStatus, number> = FLOW_STEPS.reduce(
+  (acc, s, idx) => ((acc[s.key] = idx), acc),
+  {} as Record<OrderStatus, number>
+);
+
+// Only advance within FLOW_STEPS; never advance to CANCELLED via "Next"
+const nextStatus: OrderStatus | null = useMemo(() => {
+  if (!order) return null;
+  if (order.status === "CANCELLED") return null; // terminal
+  const i = FLOW_INDEX[order.status];
+  const next = FLOW_STEPS[i + 1]?.key ?? null;
+  return next; // will be null after COMPLETED (so no Next→Cancelled button)
+}, [order?.status]);
+
 
   const totals = useMemo(() => {
     if (!order) return null;
