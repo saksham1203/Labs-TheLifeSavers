@@ -10,6 +10,7 @@ import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 
 interface User {
+  name: any;
   userId: any;
   _id: string;
   firstName: string;

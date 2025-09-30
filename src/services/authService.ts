@@ -13,7 +13,7 @@ const getAuthToken = async (): Promise<string | null> => {
 // Login Request
 export const loginRequest = async (data: { identifier: string; password: string; rememberMe: boolean }) => {
   try {
-    const response: AxiosResponse<any> = await axios.post(`${API_URL}/login`, data, {
+    const response: AxiosResponse<any> = await axios.post(`${API_URL}/lab-admins/login`, data, {
       headers: { 'Content-Type': 'application/json' },
       withCredentials: true,
     });

@@ -23,26 +23,31 @@ import {
   FaSearch,
   FaFilter,
   FaSort,
+  // NEW for stepper ACCEPTED stage
+  FaThumbsUp,
 } from "react-icons/fa";
 
 // ---- Types reused from customer app ----
-type OrderStatus =
+// EXTEND: add "ACCEPTED" to the status union
+export type OrderStatus =
   | "PLACED"
+  | "ACCEPTED" // NEW
   | "SAMPLE_COLLECTED"
   | "IN_PROGRESS"
   | "REPORT_READY"
   | "COMPLETED"
   | "CANCELLED";
 
-const ORDER_STEPS: { key: OrderStatus; label: string }[] = [
+// Insert ACCEPTED after PLACED to mirror customer TrackingModal
+export const ORDER_STEPS: { key: OrderStatus; label: string }[] = [
   { key: "PLACED", label: "Order Placed" },
+  { key: "ACCEPTED", label: "Order Accepted" }, // NEW
   { key: "SAMPLE_COLLECTED", label: "Sample Collected" },
   { key: "IN_PROGRESS", label: "In Progress" },
   { key: "REPORT_READY", label: "Report Ready" },
   { key: "COMPLETED", label: "Completed" },
   { key: "CANCELLED", label: "Cancelled" },
 ];
-
 
 // ---- Additional merchant-side types ----
 interface Address {
@@ -85,7 +90,7 @@ interface ActivityEvent {
   message: string;
 }
 
-interface Order {
+export interface Order {
   id: string;
   placedAt: string; // ISO
   labName: string;
@@ -218,6 +223,7 @@ const SectionCard: React.FC<SectionCardProps> = ({
 const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
   const map: Record<OrderStatus, string> = {
     PLACED: "bg-blue-50 text-blue-700 border-blue-200",
+    ACCEPTED: "bg-indigo-50 text-indigo-700 border-indigo-200", // NEW
     SAMPLE_COLLECTED: "bg-purple-50 text-purple-700 border-purple-200",
     IN_PROGRESS: "bg-amber-50 text-amber-700 border-amber-200",
     REPORT_READY: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -227,13 +233,15 @@ const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
   return pill(humanize(status), map[status]);
 };
 
+// Insert matching icon for ACCEPTED at index 1
 const icons = [
-  <FaClipboard />,
-  <FaFlask />,
-  <FaCog />,
-  <FaFileAlt />,
-  <FaCheckCircle />,
-  <FaTimes />,
+  <FaClipboard key="placed" />,
+  <FaThumbsUp key="accepted" />, // NEW
+  <FaFlask key="sample" />,
+  <FaCog key="progress" />,
+  <FaFileAlt key="report" />,
+  <FaCheckCircle key="done" />,
+  <FaTimes key="cancel" />,
 ];
 
 const Stepper: React.FC<{ status: OrderStatus }> = ({ status }) => {
@@ -290,7 +298,6 @@ const Stepper: React.FC<{ status: OrderStatus }> = ({ status }) => {
     </div>
   );
 };
-
 
 // ---- Small sub-components ----
 const PickupEditor: React.FC<{
@@ -517,10 +524,11 @@ const MerchantOrderManager: React.FC = () => {
     setEditPickup(false);
   };
 
+  // ---- Cancel logic with guardrails (matches customer modal) ----
   const cancelOrder = (reason: string) => {
     if (!order) return;
 
-    // Prevent cancelling terminal states
+    // Block cancelling terminal states
     if (order.status === "COMPLETED") {
       pushActivity(`Cancel attempted but blocked: Order already Completed.`);
       setShowCancel(false);
@@ -540,7 +548,7 @@ const MerchantOrderManager: React.FC = () => {
         ...o,
         status: "CANCELLED",
         payment: paymentNext,
-        phlebotomist: undefined,
+        phlebotomist: undefined, // release assignment
       };
     });
 
@@ -548,25 +556,24 @@ const MerchantOrderManager: React.FC = () => {
     setShowCancel(false);
   };
 
-// steps that participate in the normal forward flow (no CANCELLED)
-const FLOW_STEPS: { key: OrderStatus; label: string }[] = ORDER_STEPS.filter(
-  (s) => s.key !== "CANCELLED"
-);
+  // steps that participate in the normal forward flow (no CANCELLED)
+  const FLOW_STEPS: { key: OrderStatus; label: string }[] = ORDER_STEPS.filter(
+    (s) => s.key !== "CANCELLED"
+  );
 
-const FLOW_INDEX: Record<OrderStatus, number> = FLOW_STEPS.reduce(
-  (acc, s, idx) => ((acc[s.key] = idx), acc),
-  {} as Record<OrderStatus, number>
-);
+  const FLOW_INDEX: Record<OrderStatus, number> = FLOW_STEPS.reduce(
+    (acc, s, idx) => ((acc[s.key] = idx), acc),
+    {} as Record<OrderStatus, number>
+  );
 
-// Only advance within FLOW_STEPS; never advance to CANCELLED via "Next"
-const nextStatus: OrderStatus | null = useMemo(() => {
-  if (!order) return null;
-  if (order.status === "CANCELLED") return null; // terminal
-  const i = FLOW_INDEX[order.status];
-  const next = FLOW_STEPS[i + 1]?.key ?? null;
-  return next; // will be null after COMPLETED (so no Next→Cancelled button)
-}, [order?.status]);
-
+  // Only advance within FLOW_STEPS; never advance to CANCELLED via "Next"
+  const nextStatus: OrderStatus | null = useMemo(() => {
+    if (!order) return null;
+    if (order.status === "CANCELLED") return null; // terminal
+    const i = FLOW_INDEX[order.status];
+    const next = FLOW_STEPS[i + 1]?.key ?? null;
+    return next; // will be null after COMPLETED (so no Next→Cancelled button)
+  }, [order?.status]);
 
   const totals = useMemo(() => {
     if (!order) return null;
