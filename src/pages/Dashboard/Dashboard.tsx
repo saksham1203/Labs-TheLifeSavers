@@ -31,7 +31,7 @@ import { useLabOrders } from "../../hooks/useLabOrders";
 // EXTEND: add "ACCEPTED" to the status union
 export type OrderStatus =
   | "PLACED"
-  | "ACCEPTED" // NEW
+  | "Order_Accepted" // NEW
   | "SAMPLE_COLLECTED"
   | "IN_PROGRESS"
   | "REPORT_READY"
@@ -41,7 +41,7 @@ export type OrderStatus =
 // Insert ACCEPTED after PLACED to mirror customer TrackingModal
 export const ORDER_STEPS: { key: OrderStatus; label: string }[] = [
   { key: "PLACED", label: "Order Placed" },
-  { key: "ACCEPTED", label: "Order Accepted" }, // NEW
+  { key: "Order_Accepted", label: "Order Accepted" }, // NEW
   { key: "SAMPLE_COLLECTED", label: "Sample Collected" },
   { key: "IN_PROGRESS", label: "In Progress" },
   { key: "REPORT_READY", label: "Report Ready" },
@@ -144,7 +144,7 @@ function mapServerOrderToUI(o: any): Order {
   return {
     id: o.id,
     placedAt: o.createdAt,
-    labName: "", // not provided by server; keep blank or fill from context
+    labName: o.labName ?? "", // prefer labName if server sends it
     patient: {
       name: o.patientName ?? "Unknown",
       age: Number(o.age ?? 0),
@@ -155,9 +155,10 @@ function mapServerOrderToUI(o: any): Order {
     },
     address: {
       line1: o.address ?? "—",
-      city: "",
-      state: "",
-      pincode: "",
+      line2: o.addressLine2 ?? undefined,
+      city: o.city ?? "",
+      state: o.state ?? "",
+      pincode: o.pincode ?? "",
     },
     items: Array.isArray(o.items)
       ? o.items.map((it: any) => ({
@@ -186,7 +187,7 @@ function mapServerOrderToUI(o: any): Order {
         }
       : undefined,
     reportUrl: o.reportUrl ?? null,
-    notes: undefined,
+    notes: o.notes ?? undefined,
     instructions: o.instructions ?? null,
     activity: Array.isArray(o.activities)
       ? o.activities
@@ -259,13 +260,13 @@ const SectionCard: React.FC<SectionCardProps> = ({
 const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
   const map: Record<OrderStatus, string> = {
     PLACED: "bg-blue-50 text-blue-700 border-blue-200",
-    ACCEPTED: "bg-indigo-50 text-indigo-700 border-indigo-200", // NEW
+    Order_Accepted: "bg-indigo-50 text-indigo-700 border-indigo-200", // NEW
     SAMPLE_COLLECTED: "bg-purple-50 text-purple-700 border-purple-200",
     IN_PROGRESS: "bg-amber-50 text-amber-700 border-amber-200",
     REPORT_READY: "bg-emerald-50 text-emerald-700 border-emerald-200",
     COMPLETED: "bg-green-50 text-green-700 border-green-200",
     CANCELLED: "bg-gray-50 text-gray-700 border-gray-200",
-  };
+  };``
   return pill(humanize(status), map[status]);
 };
 
@@ -483,8 +484,9 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
 
 // ---- Main component ----
 const MerchantOrderManager: React.FC = () => {
-  // 1) Load from API via hook
-  const { orders: serverOrders, loading, error, reload } = useLabOrders();
+  // 1) Load from API via hook (now returns updateOrderStatus)
+  const { orders: serverOrders, loading, error, reload, updateOrderStatus } =
+    useLabOrders();
 
   // 2) Local editable copy (so UI actions like assign/notes don't mutate server yet)
   const [orders, setOrders] = useState<Order[]>([]);
@@ -528,10 +530,31 @@ const MerchantOrderManager: React.FC = () => {
     }));
   };
 
-  const updateStatus = (s: OrderStatus) => {
+  // Update status: performs optimistic update, calls API via hook, then remaps server order -> UI
+  const updateStatus = async (s: OrderStatus) => {
     if (!order) return;
+
+    // optimistic local update (keeps UI snappy)
     updateOrder((o) => ({ ...o, status: s }));
-    pushActivity(`Status updated to ${humanize(s)}`);
+    pushActivity(`Status updated to ${humanize(s)} (pending)`);
+
+    try {
+      // call server. body might have other fields in future; currently only {status}
+      const res = await updateOrderStatus(order.id, { status: s });
+
+      // res.order is the server order (raw). Map server order -> UI Order and replace local copy.
+      const serverOrder = res.order;
+      const mapped = mapServerOrderToUI(serverOrder);
+
+      setOrders((prev) => prev.map((o) => (o.id === mapped.id ? mapped : o)));
+
+      // push a definitive activity entry
+      pushActivity(`Status confirmed: ${humanize(serverOrder.status)}`);
+    } catch (err: any) {
+      // On failure, the hook already rolled back, but add an activity line + visible alert
+      pushActivity(`Status update failed: ${String(err?.message ?? err)}`);
+      alert("Failed to update status: " + (err?.message ?? "unknown error"));
+    }
   };
 
   const assignPhleb = (p: Phlebotomist) => {

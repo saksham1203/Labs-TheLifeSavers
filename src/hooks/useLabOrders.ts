@@ -4,7 +4,7 @@ import { LabOrdersService } from "../services/labOrdersService";
 
 /**
  * React hook to manage fetching lab orders.
- * Provides loading, error, and refresh handling.
+ * Provides loading, error, refresh and updateStatus handling.
  */
 export function useLabOrders() {
   const [orders, setOrders] = useState<any[]>([]);
@@ -19,7 +19,7 @@ export function useLabOrders() {
       setLoading(true);
       setError(null);
       const data = await LabOrdersService.fetchOrders();
-      setOrders(data);
+      setOrders(data ?? []);
     } catch (err: any) {
       setError(err.message || "Failed to load orders");
     } finally {
@@ -32,10 +32,48 @@ export function useLabOrders() {
     loadOrders();
   }, [loadOrders]);
 
+  /**
+   * Update order status on server.
+   * Performs optimistic update of local `orders`. Rolls back on error.
+   *
+   * @param id Order id
+   * @param body e.g. { status: "SAMPLE_COLLECTED" }
+   * @returns server response (res.data) or throws
+   */
+  const updateOrderStatus = useCallback(
+    async (id: string, body: Record<string, any>) => {
+      // snapshot for rollback
+      let prevSnapshot: any[] = [];
+      setOrders((prev) => {
+        prevSnapshot = prev;
+        // optimistic status change if provided
+        if (body.status) {
+          return prev.map((o) => (o.id === id ? { ...o, status: body.status } : o));
+        }
+        return prev;
+      });
+
+      try {
+        const res = await LabOrdersService.updateStatus(id, body);
+        // replace the raw server order for the corresponding id
+        const serverOrder = res.order;
+        setOrders((prev) => prev.map((o) => (o.id === serverOrder.id ? { ...o, ...serverOrder } : o)));
+        return res;
+      } catch (err: any) {
+        // rollback
+        setOrders(prevSnapshot);
+        setError(err?.message ?? "Failed to update order status");
+        throw err;
+      }
+    },
+    []
+  );
+
   return {
     orders,
     loading,
     error,
     reload: loadOrders, // manually trigger reload
+    updateOrderStatus,
   };
 }
