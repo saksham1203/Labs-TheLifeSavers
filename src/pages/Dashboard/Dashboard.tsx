@@ -1,4 +1,5 @@
-import React, { useMemo, useState, ReactNode } from "react";
+// src/pages/dashboard.tsx (MerchantOrderManager)
+import React, { useEffect, useMemo, useState, ReactNode } from "react";
 import {
   FaArrowLeft,
   FaClipboard,
@@ -19,13 +20,12 @@ import {
   FaEnvelope,
   FaTimes,
   FaPaperclip,
-  // added for filters:
   FaSearch,
   FaFilter,
   FaSort,
-  // NEW for stepper ACCEPTED stage
   FaThumbsUp,
 } from "react-icons/fa";
+import { useLabOrders } from "../../hooks/useLabOrders";
 
 // ---- Types reused from customer app ----
 // EXTEND: add "ACCEPTED" to the status union
@@ -63,7 +63,7 @@ interface Patient {
   age: number;
   gender: "Male" | "Female" | "Other";
   phone: string;
-  email?: string;
+  email?: string | null;
 }
 
 interface Item {
@@ -105,64 +105,100 @@ export interface Order {
   payment: Payment;
   pickupWindow?: { start: string; end: string }; // ISO
   phlebotomist?: Phlebotomist;
-  reportUrl?: string;
+  reportUrl?: string | null;
   notes?: string; // internal notes
-  instructions?: string; // customer notes
+  instructions?: string | null; // customer notes
   activity: ActivityEvent[];
 }
 
-// ---- Mock orders ----
-const MOCK_ORDER: Order = {
-  id: "ORD-2025-00073",
-  placedAt: new Date().toISOString(),
-  labName: "City Diagnostic Lab",
-  patient: {
-    name: "Aarav Sharma",
-    age: 32,
-    gender: "Male",
-    phone: "+91 98XXXXXX21",
-    email: "aarav@example.com",
-  },
-  address: {
-    line1: "Flat 402, Green Meadows",
-    line2: "Near River Park",
-    city: "Pune",
-    state: "MH",
-    pincode: "411045",
-  },
-  items: [
-    { id: "pkg1", name: "Basic Health Checkup", type: "package", price: 999 },
-    { id: "test8", name: "HbA1c (Diabetes Test)", type: "test", price: 499 },
-  ],
-  subtotal: 1498,
-  discount: 100,
-  deliveryFee: 49,
-  total: 1447,
-  status: "PLACED",
-  payment: { method: "UPI", status: "Pending" },
-  instructions: "Fasting since 8 hours. Preferred morning pickup.",
-  activity: [
-    { ts: new Date().toISOString(), message: "Order created by user" },
-  ],
+// ---------- Helpers: mapping server responses to UI Order ----------
+
+/**
+ * Parse pickup window string like:
+ * "2025-09-20T06:51:00.000Z - 2025-09-20T07:51:00.000Z"
+ */
+function parsePickupWindow(win?: string | null):
+  | { start: string; end: string }
+  | undefined {
+  if (!win) return undefined;
+  const parts = win.split(" - ");
+  if (parts.length !== 2) return undefined;
+  return { start: parts[0], end: parts[1] };
+}
+
+const toLowerType = (t: string): "package" | "test" => {
+  const s = t.toLowerCase();
+  return (s === "package" ? "package" : "test") as "package" | "test";
 };
 
-const MOCK_ORDER_B: Order = {
-  ...MOCK_ORDER,
-  id: "ORD-2025-00074",
-  patient: {
-    name: "Neha Verma",
-    age: 28,
-    gender: "Female",
-    phone: "+91 98XXXXXX11",
-    email: "neha@example.com",
-  },
-  status: "IN_PROGRESS",
-  payment: { method: "Card", status: "Paid", txnId: "TXN-987654" },
-  activity: [
-    { ts: new Date().toISOString(), message: "Order created by user" },
-    { ts: new Date().toISOString(), message: "Sample received at lab" },
-  ],
-};
+/**
+ * Map server order -> UI Order
+ * Server fields (example):
+ * {
+ *   id, patientName, patientEmail, patientPhone, gender, age,
+ *   address, pickupWindow, status, paymentMethod, paymentStatus, reportUrl,
+ *   subtotal, discount, deliveryFee, total, instructions, createdAt, items[], activities[], phlebo
+ * }
+ */
+function mapServerOrderToUI(o: any): Order {
+  return {
+    id: o.id,
+    placedAt: o.createdAt,
+    labName: "", // not provided by server; keep blank or fill from context
+    patient: {
+      name: o.patientName ?? "Unknown",
+      age: Number(o.age ?? 0),
+      gender:
+        o.gender === "Male" || o.gender === "Female" ? o.gender : "Other",
+      phone: o.patientPhone ?? "N/A",
+      email: o.patientEmail ?? null,
+    },
+    address: {
+      line1: o.address ?? "—",
+      city: "",
+      state: "",
+      pincode: "",
+    },
+    items: Array.isArray(o.items)
+      ? o.items.map((it: any) => ({
+          id: it.id,
+          name: it.name,
+          type: toLowerType(it.type || "test"),
+          price: Number(it.price ?? 0),
+        }))
+      : [],
+    subtotal: Number(o.subtotal ?? 0),
+    discount: Number(o.discount ?? 0),
+    deliveryFee: Number(o.deliveryFee ?? 0),
+    total: Number(o.total ?? 0),
+    status: (o.status ?? "PLACED") as OrderStatus,
+    payment: {
+      method: (o.paymentMethod ?? "UPI") as Payment["method"],
+      status: (o.paymentStatus ?? "Pending") as Payment["status"],
+      txnId: o.txnId ?? undefined,
+    },
+    pickupWindow: parsePickupWindow(o.pickupWindow),
+    phlebotomist: o.phlebo
+      ? {
+          id: o.phlebo.id ?? "phleb",
+          name: o.phlebo.name ?? "Phlebo",
+          phone: o.phlebo.phone ?? "",
+        }
+      : undefined,
+    reportUrl: o.reportUrl ?? null,
+    notes: undefined,
+    instructions: o.instructions ?? null,
+    activity: Array.isArray(o.activities)
+      ? o.activities
+          .slice()
+          .reverse()
+          .map((a: any) => ({
+            ts: a.createdAt,
+            message: a.actor ? `${a.actor}: ${a.note}` : a.note,
+          }))
+      : [],
+  };
+}
 
 // ---- UI helpers ----
 const pill = (text: string, cls = "bg-red-100 text-red-700 border-red-200") => (
@@ -447,8 +483,17 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
 
 // ---- Main component ----
 const MerchantOrderManager: React.FC = () => {
+  // 1) Load from API via hook
+  const { orders: serverOrders, loading, error, reload } = useLabOrders();
+
+  // 2) Local editable copy (so UI actions like assign/notes don't mutate server yet)
+  const [orders, setOrders] = useState<Order[]>([]);
+  useEffect(() => {
+    const mapped: Order[] = (serverOrders ?? []).map(mapServerOrderToUI);
+    setOrders(mapped);
+  }, [serverOrders]);
+
   // MULTI-ORDER: list -> click to open detail
-  const [orders, setOrders] = useState<Order[]>([MOCK_ORDER, MOCK_ORDER_B]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // detail view local toggles
@@ -602,8 +647,8 @@ const MerchantOrderManager: React.FC = () => {
         !q ||
         o.id.toLowerCase().includes(q) ||
         o.patient.name.toLowerCase().includes(q) ||
-        o.patient.phone.toLowerCase().includes(q) ||
-        o.labName.toLowerCase().includes(q);
+        (o.patient.phone ?? "").toLowerCase().includes(q) ||
+        (o.labName ?? "").toLowerCase().includes(q);
       return inStatus && hit;
     });
 
@@ -698,7 +743,7 @@ const MerchantOrderManager: React.FC = () => {
               <div className="text-lg sm:text-xl font-medium text-white">
                 Lab{" "}
                 <span className="font-bold text-yellow-300">
-                  {order.labName}
+                  {order.labName || "—"}
                 </span>
               </div>
               <div className="text-lg sm:text-xl font-medium text-white">
@@ -712,7 +757,25 @@ const MerchantOrderManager: React.FC = () => {
         <div className="h-1 w-full bg-gradient-to-r from-transparent via-white/60 to-transparent" />
 
         {/* CONTENT */}
-        {!orders.length && (
+        {loading && (
+          <div className="p-12 text-center text-gray-600">Loading orders…</div>
+        )}
+        {!loading && error && (
+          <div className="p-12 text-center">
+            <div className="text-red-600 font-semibold">
+              Failed to load orders
+            </div>
+            <div className="text-gray-600 mt-1">{String(error)}</div>
+            <button
+              onClick={reload}
+              className="mt-4 rounded-full bg-red-600 text-white px-4 py-2"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && !orders.length && (
           <div className="p-12 text-center">
             <div className="text-3xl mb-2">😌 No orders right now</div>
             <div className="text-gray-600">New orders will appear here.</div>
@@ -720,7 +783,7 @@ const MerchantOrderManager: React.FC = () => {
         )}
 
         {/* List view (small cards) */}
-        {!selectedId && orders.length > 0 && (
+        {!loading && !error && !selectedId && orders.length > 0 && (
           <div className="p-4 sm:p-6">
             {/* -------- Toolbar -------- */}
             <div className="mb-6 rounded-2xl border border-red-100 bg-gradient-to-r from-white/80 to-red-50/60 backdrop-blur-lg shadow-sm p-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -781,7 +844,7 @@ const MerchantOrderManager: React.FC = () => {
                 Showing{" "}
                 <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
                   {visibleOrders.length}
-                </span>
+                </span>{" "}
                 of{" "}
                 <span className="font-semibold text-gray-700">
                   {orders.length}
@@ -809,7 +872,7 @@ const MerchantOrderManager: React.FC = () => {
         )}
 
         {/* Detail view */}
-        {selectedId && order && totals && (
+        {!loading && !error && selectedId && order && totals && (
           <div className="p-4 sm:p-6 space-y-6">
             {/* Stepper */}
             <SectionCard
@@ -866,7 +929,7 @@ const MerchantOrderManager: React.FC = () => {
                     <div className="flex items-start gap-3">
                       <FaPhone className="mt-1" />
                       <div className="text-sm">
-                        <div>{order.patient.phone}</div>
+                        <div>{order.patient.phone || "N/A"}</div>
                         {order.patient.email && (
                           <div className="truncate">{order.patient.email}</div>
                         )}
@@ -909,8 +972,12 @@ const MerchantOrderManager: React.FC = () => {
                       <div>{order.address.line1}</div>
                       {order.address.line2 && <div>{order.address.line2}</div>}
                       <div>
-                        {order.address.city}, {order.address.state} -{" "}
-                        {order.address.pincode}
+                        {order.address.city}
+                        {order.address.city && (order.address.state || order.address.pincode) ? ", " : ""}
+                        {order.address.state}
+                        {order.address.pincode
+                          ? ` - ${order.address.pincode}`
+                          : ""}
                       </div>
                     </div>
                     <div className="text-sm">
@@ -962,9 +1029,7 @@ const MerchantOrderManager: React.FC = () => {
                         {order.items.map((it, idx) => (
                           <tr
                             key={`${it.type}-${it.id}-${idx}`}
-                            className={
-                              idx % 2 === 0 ? "bg-white" : "bg-gray-50"
-                            }
+                            className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
                           >
                             <td className="px-5 py-3 font-medium text-gray-800">
                               {it.name}
@@ -999,9 +1064,7 @@ const MerchantOrderManager: React.FC = () => {
                           <div className="text-xs text-gray-500">
                             {formatDateTimeIST(a.ts)}
                           </div>
-                          <div className="text-sm text-gray-800">
-                            {a.message}
-                          </div>
+                          <div className="text-sm text-gray-800">{a.message}</div>
                         </li>
                       ))}
                     </ul>
