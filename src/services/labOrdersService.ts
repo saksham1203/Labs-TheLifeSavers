@@ -2,7 +2,7 @@
 import axios from "axios";
 import { Preferences } from "@capacitor/preferences";
 
-const API_BASE = "http://localhost:5000/api";
+const API_BASE = "https://dev-service-thelifesavers-in.onrender.com/api";
 
 /**
  * Helper to get auth headers from Capacitor Preferences.
