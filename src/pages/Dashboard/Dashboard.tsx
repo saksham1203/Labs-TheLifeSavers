@@ -31,7 +31,7 @@ import { useLabOrders } from "../../hooks/useLabOrders";
 // EXTEND: add "ACCEPTED" to the status union
 export type OrderStatus =
   | "PLACED"
-  | "Order_Accepted" // NEW
+  | "ORDER_ACCEPTED" // NEW
   | "SAMPLE_COLLECTED"
   | "IN_PROGRESS"
   | "REPORT_READY"
@@ -41,7 +41,7 @@ export type OrderStatus =
 // Insert ACCEPTED after PLACED to mirror customer TrackingModal
 export const ORDER_STEPS: { key: OrderStatus; label: string }[] = [
   { key: "PLACED", label: "Order Placed" },
-  { key: "Order_Accepted", label: "Order Accepted" }, // NEW
+  { key: "ORDER_ACCEPTED", label: "Order Accepted" }, // NEW
   { key: "SAMPLE_COLLECTED", label: "Sample Collected" },
   { key: "IN_PROGRESS", label: "In Progress" },
   { key: "REPORT_READY", label: "Report Ready" },
@@ -260,7 +260,7 @@ const SectionCard: React.FC<SectionCardProps> = ({
 const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
   const map: Record<OrderStatus, string> = {
     PLACED: "bg-blue-50 text-blue-700 border-blue-200",
-    Order_Accepted: "bg-indigo-50 text-indigo-700 border-indigo-200", // NEW
+    ORDER_ACCEPTED: "bg-indigo-50 text-indigo-700 border-indigo-200", // NEW
     SAMPLE_COLLECTED: "bg-purple-50 text-purple-700 border-purple-200",
     IN_PROGRESS: "bg-amber-50 text-amber-700 border-amber-200",
     REPORT_READY: "bg-emerald-50 text-emerald-700 border-emerald-200",
