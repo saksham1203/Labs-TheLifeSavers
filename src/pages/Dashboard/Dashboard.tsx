@@ -1,5 +1,5 @@
 // src/pages/dashboard.tsx (MerchantOrderManager)
-import React, { useEffect, useMemo, useState, ReactNode } from "react";
+import React, { useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import {
   FaArrowLeft,
   FaClipboard,
@@ -9,8 +9,8 @@ import {
   FaFlask,
   FaMapMarkerAlt,
   FaPhone,
-  FaPrint,
-  FaSave,
+  // FaPrint,   // removed
+  // FaSave,    // removed
   FaUser,
   FaUserMd,
   FaCheckCircle,
@@ -24,24 +24,23 @@ import {
   FaFilter,
   FaSort,
   FaThumbsUp,
+  FaSync,
 } from "react-icons/fa";
 import { useLabOrders } from "../../hooks/useLabOrders";
 
 // ---- Types reused from customer app ----
-// EXTEND: add "ACCEPTED" to the status union
 export type OrderStatus =
   | "PLACED"
-  | "ORDER_ACCEPTED" // NEW
+  | "ORDER_ACCEPTED"
   | "SAMPLE_COLLECTED"
   | "IN_PROGRESS"
   | "REPORT_READY"
   | "COMPLETED"
   | "CANCELLED";
 
-// Insert ACCEPTED after PLACED to mirror customer TrackingModal
 export const ORDER_STEPS: { key: OrderStatus; label: string }[] = [
   { key: "PLACED", label: "Order Placed" },
-  { key: "ORDER_ACCEPTED", label: "Order Accepted" }, // NEW
+  { key: "ORDER_ACCEPTED", label: "Order Accepted" },
   { key: "SAMPLE_COLLECTED", label: "Sample Collected" },
   { key: "IN_PROGRESS", label: "In Progress" },
   { key: "REPORT_READY", label: "Report Ready" },
@@ -112,11 +111,6 @@ export interface Order {
 }
 
 // ---------- Helpers: mapping server responses to UI Order ----------
-
-/**
- * Parse pickup window string like:
- * "2025-09-20T06:51:00.000Z - 2025-09-20T07:51:00.000Z"
- */
 function parsePickupWindow(win?: string | null):
   | { start: string; end: string }
   | undefined {
@@ -131,20 +125,11 @@ const toLowerType = (t: string): "package" | "test" => {
   return (s === "package" ? "package" : "test") as "package" | "test";
 };
 
-/**
- * Map server order -> UI Order
- * Server fields (example):
- * {
- *   id, patientName, patientEmail, patientPhone, gender, age,
- *   address, pickupWindow, status, paymentMethod, paymentStatus, reportUrl,
- *   subtotal, discount, deliveryFee, total, instructions, createdAt, items[], activities[], phlebo
- * }
- */
 function mapServerOrderToUI(o: any): Order {
   return {
     id: o.id,
     placedAt: o.createdAt,
-    labName: o.labName ?? "", // prefer labName if server sends it
+    labName: o.labName ?? "",
     patient: {
       name: o.patientName ?? "Unknown",
       age: Number(o.age ?? 0),
@@ -202,6 +187,12 @@ function mapServerOrderToUI(o: any): Order {
 }
 
 // ---- UI helpers ----
+const INR = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 0,
+});
+
 const pill = (text: string, cls = "bg-red-100 text-red-700 border-red-200") => (
   <span
     className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${cls}`}
@@ -227,6 +218,28 @@ function formatDateTimeIST(date: string | Date): string {
   hours = hours % 12 || 12;
 
   return `${dd}/${mm}/${yyyy}, ${hours}:${minutes} ${ampm}`;
+}
+
+// IST helpers for date filters
+function toISTDate(d: Date | string) {
+  const x = new Date(d);
+  const utc = x.getTime() + x.getTimezoneOffset() * 60000;
+  return new Date(utc + 5.5 * 60 * 60 * 1000);
+}
+function isSameISTDay(a: Date | string, b: Date | string) {
+  const A = toISTDate(a),
+    B = toISTDate(b);
+  return (
+    A.getFullYear() === B.getFullYear() &&
+    A.getMonth() === B.getMonth() &&
+    A.getDate() === B.getDate()
+  );
+}
+function addDaysIST(d: Date | string, days: number) {
+  const t = toISTDate(d);
+  const r = new Date(t);
+  r.setDate(t.getDate() + days);
+  return r;
 }
 
 interface SectionCardProps {
@@ -260,20 +273,20 @@ const SectionCard: React.FC<SectionCardProps> = ({
 const StatusBadge: React.FC<{ status: OrderStatus }> = ({ status }) => {
   const map: Record<OrderStatus, string> = {
     PLACED: "bg-blue-50 text-blue-700 border-blue-200",
-    ORDER_ACCEPTED: "bg-indigo-50 text-indigo-700 border-indigo-200", // NEW
+    ORDER_ACCEPTED: "bg-indigo-50 text-indigo-700 border-indigo-200",
     SAMPLE_COLLECTED: "bg-purple-50 text-purple-700 border-purple-200",
     IN_PROGRESS: "bg-amber-50 text-amber-700 border-amber-200",
     REPORT_READY: "bg-emerald-50 text-emerald-700 border-emerald-200",
     COMPLETED: "bg-green-50 text-green-700 border-green-200",
     CANCELLED: "bg-gray-50 text-gray-700 border-gray-200",
-  };``
+  };
   return pill(humanize(status), map[status]);
 };
 
 // Insert matching icon for ACCEPTED at index 1
 const icons = [
   <FaClipboard key="placed" />,
-  <FaThumbsUp key="accepted" />, // NEW
+  <FaThumbsUp key="accepted" />,
   <FaFlask key="sample" />,
   <FaCog key="progress" />,
   <FaFileAlt key="report" />,
@@ -282,11 +295,10 @@ const icons = [
 ];
 
 const Stepper: React.FC<{ status: OrderStatus }> = ({ status }) => {
-  // If cancelled, render a track that excludes "Completed"
   const steps =
     status === "CANCELLED"
-      ? ORDER_STEPS.filter((s) => s.key !== "COMPLETED") // Placed → … → Cancelled
-      : ORDER_STEPS.filter((s) => s.key !== "CANCELLED"); // Placed → … → Completed
+      ? ORDER_STEPS.filter((s) => s.key !== "COMPLETED")
+      : ORDER_STEPS.filter((s) => s.key !== "CANCELLED");
 
   const idx = steps.findIndex((s) => s.key === status);
 
@@ -442,8 +454,17 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
   onOpen,
 }) => {
   const totalItems = order.items.length;
+  const windowLabel = order.pickupWindow
+    ? `${formatDateTimeIST(order.pickupWindow.start)} — ${formatDateTimeIST(
+        order.pickupWindow.end
+      )}`
+    : "Not set";
+
   return (
-    <div className="rounded-2xl border border-red-100 bg-white p-5 flex flex-col gap-4 shadow-sm hover:shadow-xl hover:border-red-200 transition-all duration-300">
+    <div
+      className="rounded-2xl border border-red-100 bg-white p-5 flex flex-col gap-4 shadow-sm hover:shadow-xl hover:border-red-200 transition-all duration-300"
+      aria-label={`Order card ${order.id}`}
+    >
       {/* Top Row: ID + Status */}
       <div className="flex items-center justify-between">
         <div className="font-mono text-sm sm:text-base font-semibold text-gray-800">
@@ -465,15 +486,25 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
         </div>
       </div>
 
+      {/* Pickup window */}
+      <div className="text-xs text-gray-700 flex items-center gap-2" title="Sample pickup window">
+        <FaClock className="opacity-70" aria-hidden />
+        <span className="font-medium">Pickup:</span>
+        <span className="text-gray-600">{windowLabel}</span>
+      </div>
+
       {/* Footer: Items + Total + Action */}
       <div className="flex items-center justify-between text-sm sm:text-base">
         <span className="text-gray-700">
           {totalItems} {totalItems > 1 ? "items" : "item"} •{" "}
-          <span className="font-semibold text-gray-900">₹{order.total}</span>
+          <span className="font-semibold text-gray-900">
+            {INR.format(order.total)}
+          </span>
         </span>
         <button
           onClick={onOpen}
           className="rounded-full bg-gradient-to-r from-red-600 to-red-500 text-white px-4 py-1.5 text-xs sm:text-sm font-semibold shadow-md hover:shadow-lg hover:from-red-700 hover:to-red-600 transition-all"
+          aria-label={`Open order ${order.id}`}
         >
           Open
         </button>
@@ -484,21 +515,17 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
 
 // ---- Main component ----
 const MerchantOrderManager: React.FC = () => {
-  // 1) Load from API via hook (now returns updateOrderStatus)
   const { orders: serverOrders, loading, error, reload, updateOrderStatus } =
     useLabOrders();
 
-  // 2) Local editable copy (so UI actions like assign/notes don't mutate server yet)
   const [orders, setOrders] = useState<Order[]>([]);
   useEffect(() => {
     const mapped: Order[] = (serverOrders ?? []).map(mapServerOrderToUI);
     setOrders(mapped);
   }, [serverOrders]);
 
-  // MULTI-ORDER: list -> click to open detail
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // detail view local toggles
   const [editPickup, setEditPickup] = useState(false);
   const [editPayment, setEditPayment] = useState(false);
   const [reportFileNameByOrder, setReportFileNameByOrder] = useState<
@@ -506,11 +533,53 @@ const MerchantOrderManager: React.FC = () => {
   >({});
   const [showCancel, setShowCancel] = useState(false);
 
-  // -------- NEW: list filters/sort/search (kept to your visual style) --------
+  // -------- Filters/sort/search --------
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "ALL">("ALL");
+
+  // DEFAULT DAY FILTER = TODAY (changed)
+  type DayFilter = "ALL" | "TODAY" | "TOMORROW";
+  const [dayFilter, setDayFilter] = useState<DayFilter>("TODAY");
+
   const [sortKey, setSortKey] = useState<"placedAt" | "total">("placedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Refresh controls (manual + auto)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const refreshingRef = useRef(false);
+
+  const safeReload = async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    try {
+      await reload();
+      setLastUpdated(new Date());
+    } finally {
+      refreshingRef.current = false;
+    }
+  };
+
+  // Auto refresh every 2 minutes; also refresh when tab regains focus
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "visible") safeReload();
+    };
+    const id = setInterval(tick, 120000); // 2 minutes
+    const vis = () => {
+      if (document.visibilityState === "visible") safeReload();
+    };
+    document.addEventListener("visibilitychange", vis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", vis);
+    };
+  }, []);
 
   const order = useMemo(
     () => orders.find((o) => o.id === selectedId) ?? null,
@@ -530,28 +599,17 @@ const MerchantOrderManager: React.FC = () => {
     }));
   };
 
-  // Update status: performs optimistic update, calls API via hook, then remaps server order -> UI
   const updateStatus = async (s: OrderStatus) => {
     if (!order) return;
-
-    // optimistic local update (keeps UI snappy)
     updateOrder((o) => ({ ...o, status: s }));
     pushActivity(`Status updated to ${humanize(s)} (pending)`);
-
     try {
-      // call server. body might have other fields in future; currently only {status}
       const res = await updateOrderStatus(order.id, { status: s });
-
-      // res.order is the server order (raw). Map server order -> UI Order and replace local copy.
       const serverOrder = res.order;
       const mapped = mapServerOrderToUI(serverOrder);
-
       setOrders((prev) => prev.map((o) => (o.id === mapped.id ? mapped : o)));
-
-      // push a definitive activity entry
       pushActivity(`Status confirmed: ${humanize(serverOrder.status)}`);
     } catch (err: any) {
-      // On failure, the hook already rolled back, but add an activity line + visible alert
       pushActivity(`Status update failed: ${String(err?.message ?? err)}`);
       alert("Failed to update status: " + (err?.message ?? "unknown error"));
     }
@@ -592,11 +650,8 @@ const MerchantOrderManager: React.FC = () => {
     setEditPickup(false);
   };
 
-  // ---- Cancel logic with guardrails (matches customer modal) ----
   const cancelOrder = (reason: string) => {
     if (!order) return;
-
-    // Block cancelling terminal states
     if (order.status === "COMPLETED") {
       pushActivity(`Cancel attempted but blocked: Order already Completed.`);
       setShowCancel(false);
@@ -606,41 +661,34 @@ const MerchantOrderManager: React.FC = () => {
       setShowCancel(false);
       return;
     }
-
     updateOrder((o) => {
       const paymentNext: Payment =
         o.payment.status === "Paid"
           ? { ...o.payment, status: "Refunded" }
-          : o.payment; // keep Pending if not paid
+          : o.payment;
       return {
         ...o,
         status: "CANCELLED",
         payment: paymentNext,
-        phlebotomist: undefined, // release assignment
+        phlebotomist: undefined,
       };
     });
-
     pushActivity(`Order cancelled. Reason: ${reason}`);
     setShowCancel(false);
   };
 
-  // steps that participate in the normal forward flow (no CANCELLED)
-  const FLOW_STEPS: { key: OrderStatus; label: string }[] = ORDER_STEPS.filter(
-    (s) => s.key !== "CANCELLED"
-  );
-
+  const FLOW_STEPS = ORDER_STEPS.filter((s) => s.key !== "CANCELLED");
   const FLOW_INDEX: Record<OrderStatus, number> = FLOW_STEPS.reduce(
     (acc, s, idx) => ((acc[s.key] = idx), acc),
     {} as Record<OrderStatus, number>
   );
 
-  // Only advance within FLOW_STEPS; never advance to CANCELLED via "Next"
   const nextStatus: OrderStatus | null = useMemo(() => {
     if (!order) return null;
-    if (order.status === "CANCELLED") return null; // terminal
+    if (order.status === "CANCELLED") return null;
     const i = FLOW_INDEX[order.status];
     const next = FLOW_STEPS[i + 1]?.key ?? null;
-    return next; // will be null after COMPLETED (so no Next→Cancelled button)
+    return next;
   }, [order?.status]);
 
   const totals = useMemo(() => {
@@ -653,26 +701,35 @@ const MerchantOrderManager: React.FC = () => {
     };
   }, [order]);
 
-  // demo phlebotomists list
   const PHLEBS: Phlebotomist[] = [
     { id: "p1", name: "Rohit Kulkarni", phone: "+91 98XXXXXX01" },
     { id: "p2", name: "Sneha Iyer", phone: "+91 98XXXXXX02" },
     { id: "p3", name: "Manish Gupta", phone: "+91 98XXXXXX03" },
   ];
 
-  // -------- NEW: derive visible orders by filters/sort/search --------
+  // -------- derive visible orders by filters/sort/search --------
   const visibleOrders = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = debouncedQuery.toLowerCase();
+    const getRefDate = (o: Order) => o.pickupWindow?.start ?? o.placedAt;
 
     let list = orders.filter((o) => {
       const inStatus = statusFilter === "ALL" || o.status === statusFilter;
+
+      const inDay =
+        dayFilter === "ALL"
+          ? true
+          : dayFilter === "TODAY"
+          ? isSameISTDay(getRefDate(o), new Date())
+          : isSameISTDay(getRefDate(o), addDaysIST(new Date(), 1));
+
       const hit =
         !q ||
         o.id.toLowerCase().includes(q) ||
         o.patient.name.toLowerCase().includes(q) ||
         (o.patient.phone ?? "").toLowerCase().includes(q) ||
         (o.labName ?? "").toLowerCase().includes(q);
-      return inStatus && hit;
+
+      return inStatus && inDay && hit;
     });
 
     list.sort((a, b) => {
@@ -687,7 +744,7 @@ const MerchantOrderManager: React.FC = () => {
     });
 
     return list;
-  }, [orders, query, statusFilter, sortKey, sortDir]);
+  }, [orders, debouncedQuery, statusFilter, dayFilter, sortKey, sortDir]);
 
   return (
     <div
@@ -727,23 +784,21 @@ const MerchantOrderManager: React.FC = () => {
               )}
             </div>
 
-            {/* Right-side buttons */}
+            {/* Right-side buttons — print/save removed; keep refresh in list mode */}
             <div className="flex gap-2 sm:gap-3">
-              {selectedId && (
-                <>
-                  <button
-                    className="px-3 sm:px-4 py-2 bg-red-600 rounded-full shadow hover:bg-red-700 flex items-center"
-                    onClick={() => window.print()}
-                  >
-                    <FaPrint className="mr-2" /> Print
-                  </button>
-                  <button
-                    className="px-3 sm:px-4 py-2 bg-red-600 rounded-full shadow hover:bg-red-700 flex items-center"
-                    onClick={() => alert("Saved (demo)")}
-                  >
-                    <FaSave className="mr-2" /> Save
-                  </button>
-                </>
+              {!selectedId && (
+                <button
+                  onClick={safeReload}
+                  className="px-3 sm:px-4 py-2 bg-red-600 rounded-full shadow hover:bg-red-700 flex items-center"
+                  aria-label="Refresh orders"
+                  title="Refresh"
+                  disabled={refreshingRef.current}
+                >
+                  <FaSync
+                    className={refreshingRef.current ? "animate-spin mr-2" : "mr-2"}
+                  />
+                  Refresh
+                </button>
               )}
             </div>
           </div>
@@ -790,7 +845,7 @@ const MerchantOrderManager: React.FC = () => {
             </div>
             <div className="text-gray-600 mt-1">{String(error)}</div>
             <button
-              onClick={reload}
+              onClick={safeReload}
               className="mt-4 rounded-full bg-red-600 text-white px-4 py-2"
             >
               Retry
@@ -820,24 +875,42 @@ const MerchantOrderManager: React.FC = () => {
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="🔎 Search by ID, name, phone, lab…"
                     className="w-full pl-9 pr-4 py-2.5 rounded-full border bg-white/90 border-gray-200 text-sm focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
+                    aria-label="Search orders"
                   />
                 </div>
 
-                {/* Filter */}
+                {/* Status Filter */}
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <FaFilter className="text-gray-400 hidden sm:block" />
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value as any)}
-                    className="w-full sm:w-auto rounded-lg border bg-white/90 border-gray-200 text-sm px-3 py-2 focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
+                    className="w-full sm:w-auto rounded-lg border bg.white/90 bg-white/90 border-gray-200 text-sm px-3 py-2 focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
                     title="Filter by status"
+                    aria-label="Filter by status"
                   >
-                    <option value="ALL">All</option>
+                    <option value="ALL">All statuses</option>
                     {ORDER_STEPS.map((s) => (
                       <option key={s.key} value={s.key}>
                         {s.label}
                       </option>
                     ))}
+                  </select>
+                </div>
+
+                {/* Day Filter (default Today) */}
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <FaClock className="text-gray-400 hidden sm:block" />
+                  <select
+                    value={dayFilter}
+                    onChange={(e) => setDayFilter(e.target.value as DayFilter)}
+                    className="w-full sm:w-auto rounded-lg border bg-white/90 border-gray-200 text-sm px-3 py-2 focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
+                    title="Filter by day"
+                    aria-label="Filter by day"
+                  >
+                    <option value="ALL">All days</option>
+                    <option value="TODAY">Today</option>
+                    <option value="TOMORROW">Tomorrow</option>
                   </select>
                 </div>
 
@@ -853,6 +926,7 @@ const MerchantOrderManager: React.FC = () => {
                     }}
                     className="w-full sm:w-auto rounded-lg border bg-white/90 border-gray-200 text-sm px-3 py-2 focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
                     title="Sort"
+                    aria-label="Sort orders"
                   >
                     <option value="placedAt:desc">Newest</option>
                     <option value="placedAt:asc">Oldest</option>
@@ -862,16 +936,35 @@ const MerchantOrderManager: React.FC = () => {
                 </div>
               </div>
 
-              {/* Right: Count */}
-              <div className="text-xs sm:text-sm text-gray-600 text-center sm:text-right">
-                Showing{" "}
-                <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
-                  {visibleOrders.length}
-                </span>{" "}
-                of{" "}
-                <span className="font-semibold text-gray-700">
-                  {orders.length}
-                </span>
+              {/* Right: Count + Last updated + Refresh */}
+              <div className="flex items-center gap-3 justify-between sm:justify-end">
+                <div className="text-xs sm:text-sm text-gray-600 text-center sm:text-right">
+                  Showing{" "}
+                  <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
+                    {visibleOrders.length}
+                  </span>{" "}
+                  of{" "}
+                  <span className="font-semibold text-gray-700">
+                    {orders.length}
+                  </span>
+                  {lastUpdated && (
+                    <span className="ml-2 text-gray-500">
+                      • Updated {formatDateTimeIST(lastUpdated)}
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={safeReload}
+                  className="px-3 py-2 bg-white rounded-full shadow-inner ring-1 ring-red-200 hover:bg-red-50 flex items-center text-sm"
+                  aria-label="Refresh orders"
+                  title="Refresh"
+                  disabled={refreshingRef.current}
+                >
+                  <FaSync
+                    className={refreshingRef.current ? "animate-spin mr-2" : "mr-2"}
+                  />
+                  Refresh
+                </button>
               </div>
             </div>
             {/* -------- /Toolbar -------- */}
@@ -923,7 +1016,6 @@ const MerchantOrderManager: React.FC = () => {
                     Mark Completed
                   </button>
                 )}
-                {/* Cancel button removed from here */}
               </div>
             </SectionCard>
 
@@ -957,10 +1049,16 @@ const MerchantOrderManager: React.FC = () => {
                           <div className="truncate">{order.patient.email}</div>
                         )}
                         <div className="mt-2 flex gap-2">
-                          <button className="rounded-full border px-3 py-1 text-xs flex items-center gap-2 hover:bg-red-50">
+                          <button
+                            className="rounded-full border px-3 py-1 text-xs flex items-center gap-2 hover:bg-red-50"
+                            aria-label="Send WhatsApp message"
+                          >
                             <FaWhatsapp /> WhatsApp
                           </button>
-                          <button className="rounded-full border px-3 py-1 text-xs flex items-center gap-2 hover:bg-red-50">
+                          <button
+                            className="rounded-full border px-3 py-1 text-xs flex items-center gap-2 hover:bg-red-50"
+                            aria-label="Send email"
+                          >
                             <FaEnvelope /> Email
                           </button>
                         </div>
@@ -981,6 +1079,7 @@ const MerchantOrderManager: React.FC = () => {
                       <button
                         onClick={() => setEditPickup((v) => !v)}
                         className="rounded-full bg-red-600 text-white px-3 py-1 text-xs font-semibold flex items-center gap-2 hover:bg-red-700"
+                        aria-label={editPickup ? "Close pickup editor" : "Edit pickup window"}
                       >
                         <FaEdit /> {editPickup ? "Close" : "Edit"}
                       </button>
@@ -996,7 +1095,10 @@ const MerchantOrderManager: React.FC = () => {
                       {order.address.line2 && <div>{order.address.line2}</div>}
                       <div>
                         {order.address.city}
-                        {order.address.city && (order.address.state || order.address.pincode) ? ", " : ""}
+                        {order.address.city &&
+                        (order.address.state || order.address.pincode)
+                          ? ", "
+                          : ""}
                         {order.address.state}
                         {order.address.pincode
                           ? ` - ${order.address.pincode}`
@@ -1052,14 +1154,16 @@ const MerchantOrderManager: React.FC = () => {
                         {order.items.map((it, idx) => (
                           <tr
                             key={`${it.type}-${it.id}-${idx}`}
-                            className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
+                            className={
+                              idx % 2 === 0 ? "bg-white" : "bg-gray-50"
+                            }
                           >
                             <td className="px-5 py-3 font-medium text-gray-800">
                               {it.name}
                             </td>
                             <td className="px-5 py-3">{pill(it.type)}</td>
                             <td className="px-5 py-3 text-right font-bold text-red-600">
-                              ₹{it.price}
+                              {INR.format(it.price)}
                             </td>
                           </tr>
                         ))}
@@ -1087,7 +1191,9 @@ const MerchantOrderManager: React.FC = () => {
                           <div className="text-xs text-gray-500">
                             {formatDateTimeIST(a.ts)}
                           </div>
-                          <div className="text-sm text-gray-800">{a.message}</div>
+                          <div className="text-sm text-gray-800">
+                            {a.message}
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -1158,6 +1264,7 @@ const MerchantOrderManager: React.FC = () => {
                       <button
                         onClick={() => setEditPayment((v) => !v)}
                         className="rounded-full bg-red-600 text-white px-3 py-1 text-xs font-semibold flex items-center gap-2 hover:bg-red-700"
+                        aria-label={editPayment ? "Close payment editor" : "Edit payment"}
                       >
                         <FaEdit /> {editPayment ? "Close" : "Edit"}
                       </button>
@@ -1279,24 +1386,28 @@ const MerchantOrderManager: React.FC = () => {
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span>Subtotal</span>
-                      <span className="font-semibold">₹{totals.subtotal}</span>
+                      <span className="font-semibold">
+                        {INR.format(totals.subtotal)}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span>Discount</span>
                       <span className="font-semibold text-green-700">
-                        -₹{totals.discount}
+                        -{INR.format(totals.discount)}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span>Collection/Delivery</span>
                       <span className="font-semibold">
-                        ₹{totals.deliveryFee}
+                        {INR.format(totals.deliveryFee)}
                       </span>
                     </div>
                     <div className="h-px bg-gray-200" />
                     <div className="flex justify-between text-lg font-extrabold">
                       <span>Total</span>
-                      <span className="text-red-600">₹{totals.total}</span>
+                      <span className="text-red-600">
+                        {INR.format(totals.total)}
+                      </span>
                     </div>
                   </div>
                 </SectionCard>
@@ -1358,6 +1469,7 @@ const MerchantOrderManager: React.FC = () => {
                      shadow-inner ring-1 ring-red-200 
                      hover:bg-red-50 transition"
                 title="Cancel this order"
+                aria-label="Cancel this order"
               >
                 Cancel
               </button>
