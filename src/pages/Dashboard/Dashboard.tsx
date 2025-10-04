@@ -448,7 +448,7 @@ const CancelForm: React.FC<{ onCancel: (reason: string) => void }> = ({
   );
 };
 
-// ---- Small order card for list view ----
+// ---- Small order card for list view (eye-catching & clean) ----
 const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
   order,
   onOpen,
@@ -460,50 +460,120 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
       )}`
     : "Not set";
 
+  // Mini progress for the current status (excludes CANCELLED from the flow)
+  const FLOW = ORDER_STEPS.filter((s) => s.key !== "CANCELLED");
+  const idx = Math.max(0, FLOW.findIndex((s) => s.key === order.status));
+  const progress = Math.round(((idx + 1) / FLOW.length) * 100);
+
+  // Avatar initials
+  const initials = order.patient.name
+    .split(" ")
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
   return (
     <div
-      className="rounded-2xl border border-red-100 bg-white p-5 flex flex-col gap-4 shadow-sm hover:shadow-xl hover:border-red-200 transition-all duration-300"
+      className="group relative rounded-2xl border border-red-100 bg-white/95 backdrop-blur
+                 p-5 flex flex-col gap-4 shadow-sm
+                 hover:shadow-2xl hover:-translate-y-0.5 hover:border-red-200 transition-all duration-300"
       aria-label={`Order card ${order.id}`}
     >
-      {/* Top Row: ID + Status */}
-      <div className="flex items-center justify-between">
+      {/* Top Row: ID + Total */}
+      <div className="relative z-10 flex items-center justify-between">
         <div className="font-mono text-sm sm:text-base font-semibold text-gray-800">
           #{order.id}
         </div>
-        <StatusBadge status={order.status} />
+        <div
+          className="shrink-0 rounded-full px-3 py-1 text-xs font-extrabold
+                     bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-md"
+          title="Order Total"
+        >
+          {INR.format(order.total)}
+        </div>
       </div>
 
-      {/* Patient + Placed Info */}
-      <div>
-        <div className="text-base font-semibold text-gray-900">
-          {order.patient.name}
+      {/* Patient + Avatar */}
+      <div className="relative z-10 flex items-center gap-3">
+        <div className="h-9 w-9 rounded-full bg-gradient-to-br from-red-100 to-red-200 text-red-700 
+                        font-bold text-xs flex items-center justify-center shadow-inner">
+          {initials}
         </div>
-        <div className="text-xs text-gray-500 mt-0.5">
-          Placed on{" "}
-          <span className="font-medium text-gray-600">
-            {formatDateTimeIST(order.placedAt)}
+        <div className="flex-1 min-w-0">
+          <div className="text-base font-bold text-gray-900 truncate tracking-tight">
+            {order.patient.name}
+          </div>
+          <div className="text-[11px] text-gray-500 mt-0.5">
+            Placed on{" "}
+            <span className="font-medium text-gray-700">
+              {formatDateTimeIST(order.placedAt)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Status + mini progress */}
+      <div className="relative z-10 space-y-2">
+        <div className="flex items-center justify-between">
+          <StatusBadge status={order.status} />
+          <span className="text-[11px] text-gray-500 font-medium">
+            {progress}% complete
           </span>
+        </div>
+        <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden ring-1 ring-gray-100">
+          <div
+            className={`h-full rounded-full bg-gradient-to-r
+                        ${
+                          order.status === "CANCELLED"
+                            ? "from-gray-400 to-gray-500"
+                            : "from-red-500 via-orange-500 to-amber-400"
+                        }
+                        ${
+                          order.status === "IN_PROGRESS" ? "animate-pulse" : ""
+                        }`}
+            style={{ width: `${order.status === "CANCELLED" ? 100 : progress}%` }}
+          />
+        </div>
+        {/* Mini timeline strip */}
+        <div className="flex justify-center gap-1">
+          {FLOW.map((s, i) => (
+            <span
+              key={s.key}
+              className={`h-1.5 w-4 rounded-full ${
+                i <= idx ? "bg-red-500" : "bg-gray-200"
+              }`}
+            />
+          ))}
         </div>
       </div>
 
       {/* Pickup window */}
-      <div className="text-xs text-gray-700 flex items-center gap-2" title="Sample pickup window">
+      <div
+        className="relative z-10 text-[11px] sm:text-xs text-gray-700 flex items-center gap-2
+                   bg-red-50/70 border border-red-100 rounded-xl px-3 py-2"
+        title="Sample pickup window"
+      >
         <FaClock className="opacity-70" aria-hidden />
         <span className="font-medium">Pickup:</span>
-        <span className="text-gray-600">{windowLabel}</span>
+        <span className="text-gray-900 font-semibold truncate">
+          {windowLabel}
+        </span>
       </div>
 
-      {/* Footer: Items + Total + Action */}
-      <div className="flex items-center justify-between text-sm sm:text-base">
+      {/* Footer: Items + Action */}
+      <div className="relative z-10 flex items-center justify-between text-sm sm:text-base">
         <span className="text-gray-700">
-          {totalItems} {totalItems > 1 ? "items" : "item"} •{" "}
-          <span className="font-semibold text-gray-900">
-            {INR.format(order.total)}
+          <span className="rounded-full border border-gray-200 px-2 py-0.5 text-xs sm:text-sm bg-white/70">
+            {totalItems} {totalItems > 1 ? "items" : "item"}
           </span>
         </span>
         <button
           onClick={onOpen}
-          className="rounded-full bg-gradient-to-r from-red-600 to-red-500 text-white px-4 py-1.5 text-xs sm:text-sm font-semibold shadow-md hover:shadow-lg hover:from-red-700 hover:to-red-600 transition-all"
+          className="rounded-full bg-gradient-to-r from-red-600 to-red-500 text-white
+                     px-4 py-1.5 text-xs sm:text-sm font-semibold shadow-md
+                     hover:shadow-lg hover:from-red-700 hover:to-red-600
+                     active:scale-[0.98] transition-all"
           aria-label={`Open order ${order.id}`}
         >
           Open
@@ -512,6 +582,7 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
     </div>
   );
 };
+
 
 // ---- Main component ----
 const MerchantOrderManager: React.FC = () => {
@@ -566,20 +637,14 @@ const MerchantOrderManager: React.FC = () => {
   };
 
   // Auto refresh every 2 minutes; also refresh when tab regains focus
+  // Auto refresh every 2 minutes only (no instant refresh on return/focus)
   useEffect(() => {
-    const tick = () => {
+    const id = setInterval(() => {
       if (document.visibilityState === "visible") safeReload();
-    };
-    const id = setInterval(tick, 120000); // 2 minutes
-    const vis = () => {
-      if (document.visibilityState === "visible") safeReload();
-    };
-    document.addEventListener("visibilitychange", vis);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", vis);
-    };
+    }, 120000); // 2 minutes
+    return () => clearInterval(id);
   }, []);
+
 
   const order = useMemo(
     () => orders.find((o) => o.id === selectedId) ?? null,
@@ -885,7 +950,7 @@ const MerchantOrderManager: React.FC = () => {
                   <select
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value as any)}
-                    className="w-full sm:w-auto rounded-lg border bg.white/90 bg-white/90 border-gray-200 text-sm px-3 py-2 focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
+                    className="w-full sm:w-auto rounded-lg border bg-white/90 border-gray-200 text-sm px-3 py-2 focus:ring-2 focus:ring-red-300 focus:border-red-300 transition"
                     title="Filter by status"
                     aria-label="Filter by status"
                   >
