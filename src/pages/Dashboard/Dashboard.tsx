@@ -715,32 +715,55 @@ const MerchantOrderManager: React.FC = () => {
     setEditPickup(false);
   };
 
-  const cancelOrder = (reason: string) => {
-    if (!order) return;
-    if (order.status === "COMPLETED") {
-      pushActivity(`Cancel attempted but blocked: Order already Completed.`);
-      setShowCancel(false);
-      return;
-    }
-    if (order.status === "CANCELLED") {
-      setShowCancel(false);
-      return;
-    }
-    updateOrder((o) => {
-      const paymentNext: Payment =
-        o.payment.status === "Paid"
-          ? { ...o.payment, status: "Refunded" }
-          : o.payment;
-      return {
-        ...o,
-        status: "CANCELLED",
-        payment: paymentNext,
-        phlebotomist: undefined,
-      };
-    });
-    pushActivity(`Order cancelled. Reason: ${reason}`);
+  const cancelOrder = async (reason: string) => {
+  if (!order) return;
+
+  if (order.status === "COMPLETED") {
+    pushActivity(`Cancel attempted but blocked: Order already Completed.`);
     setShowCancel(false);
-  };
+    return;
+  }
+  if (order.status === "CANCELLED") {
+    setShowCancel(false);
+    return;
+  }
+
+  // Optimistic update
+  updateOrder((o) => {
+    const paymentNext: Payment =
+      o.payment.status === "Paid"
+        ? { ...o.payment, status: "Refunded" }
+        : o.payment;
+    return {
+      ...o,
+      status: "CANCELLED",
+      payment: paymentNext,
+      phlebotomist: undefined,
+    };
+  });
+
+  pushActivity(`Order cancelled. Reason: ${reason} (pending)`);
+
+  try {
+    // 🔴 tell backend it’s cancelled
+    const res = await updateOrderStatus(order.id, {
+      status: "CANCELLED",
+      reason,
+    });
+    const mapped = mapServerOrderToUI(res.order);
+    setOrders((prev) =>
+      prev.map((o) => (o.id === mapped.id ? mapped : o))
+    );
+    pushActivity(`Status confirmed: Cancelled`);
+  } catch (err: any) {
+    pushActivity(
+      `Cancel failed: ${String(err?.message ?? err)}`
+    );
+    alert("Failed to cancel order: " + (err?.message ?? "unknown error"));
+  }
+
+  setShowCancel(false);
+};
 
   const FLOW_STEPS = ORDER_STEPS.filter((s) => s.key !== "CANCELLED");
   const FLOW_INDEX: Record<OrderStatus, number> = FLOW_STEPS.reduce(
