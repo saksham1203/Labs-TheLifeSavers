@@ -1,4 +1,3 @@
-// src/pages/dashboard.tsx (MerchantOrderManager)
 import React, { useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import {
   FaArrowLeft,
@@ -9,8 +8,6 @@ import {
   FaFlask,
   FaMapMarkerAlt,
   FaPhone,
-  // FaPrint,   // removed
-  // FaSave,    // removed
   FaUser,
   FaUserMd,
   FaCheckCircle,
@@ -27,6 +24,7 @@ import {
   FaSync,
 } from "react-icons/fa";
 import { useLabOrders } from "../../hooks/useLabOrders";
+import { LabOrdersService } from "../../services/labOrdersService";
 
 // ---- Types reused from customer app ----
 export type OrderStatus =
@@ -111,9 +109,9 @@ export interface Order {
 }
 
 // ---------- Helpers: mapping server responses to UI Order ----------
-function parsePickupWindow(win?: string | null):
-  | { start: string; end: string }
-  | undefined {
+function parsePickupWindow(
+  win?: string | null
+): { start: string; end: string } | undefined {
   if (!win) return undefined;
   const parts = win.split(" - ");
   if (parts.length !== 2) return undefined;
@@ -448,7 +446,7 @@ const CancelForm: React.FC<{ onCancel: (reason: string) => void }> = ({
   );
 };
 
-// ---- Small order card for list view (eye-catching & clean) ----
+// ---- Small order card for list view ----
 const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
   order,
   onOpen,
@@ -460,7 +458,7 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
       )}`
     : "Not set";
 
-  // Mini progress for the current status (excludes CANCELLED from the flow)
+  // Mini progress (excludes CANCELLED)
   const FLOW = ORDER_STEPS.filter((s) => s.key !== "CANCELLED");
   const idx = Math.max(0, FLOW.findIndex((s) => s.key === order.status));
   const progress = Math.round(((idx + 1) / FLOW.length) * 100);
@@ -583,7 +581,6 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
   );
 };
 
-
 // ---- Main component ----
 const MerchantOrderManager: React.FC = () => {
   const { orders: serverOrders, loading, error, reload, updateOrderStatus } =
@@ -602,6 +599,9 @@ const MerchantOrderManager: React.FC = () => {
   const [reportFileNameByOrder, setReportFileNameByOrder] = useState<
     Record<string, string | undefined>
   >({});
+  const [uploadingByOrder, setUploadingByOrder] = useState<
+    Record<string, boolean>
+  >({});
   const [showCancel, setShowCancel] = useState(false);
 
   // -------- Filters/sort/search --------
@@ -614,7 +614,7 @@ const MerchantOrderManager: React.FC = () => {
 
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "ALL">("ALL");
 
-  // DEFAULT DAY FILTER = TODAY (changed)
+  // DEFAULT DAY FILTER = TODAY
   type DayFilter = "ALL" | "TODAY" | "TOMORROW";
   const [dayFilter, setDayFilter] = useState<DayFilter>("TODAY");
 
@@ -636,15 +636,13 @@ const MerchantOrderManager: React.FC = () => {
     }
   };
 
-  // Auto refresh every 2 minutes; also refresh when tab regains focus
-  // Auto refresh every 2 minutes only (no instant refresh on return/focus)
+  // Auto refresh every 2 minutes (when visible)
   useEffect(() => {
     const id = setInterval(() => {
       if (document.visibilityState === "visible") safeReload();
-    }, 120000); // 2 minutes
+    }, 120000);
     return () => clearInterval(id);
   }, []);
-
 
   const order = useMemo(
     () => orders.find((o) => o.id === selectedId) ?? null,
@@ -695,13 +693,42 @@ const MerchantOrderManager: React.FC = () => {
     pushActivity("Payment marked as Paid");
   };
 
-  const uploadReport = (file: File) => {
+  // NEW: Real upload flow using pre-signed URL
+  const uploadReport = async (file: File) => {
     if (!order) return;
-    const fakeUrl = URL.createObjectURL(file); // demo
-    updateOrder((o) => ({ ...o, reportUrl: fakeUrl }));
-    setReportFileNameByOrder((m) => ({ ...m, [order.id]: file.name }));
-    if (order.status === "IN_PROGRESS") updateStatus("REPORT_READY");
-    pushActivity(`Report uploaded: ${file.name}`);
+
+    const id = order.id; // pass order id to API
+    const contentType = file.type || "application/pdf";
+    const size = file.size;
+
+    setUploadingByOrder((m) => ({ ...m, [id]: true }));
+    pushActivity(
+      `Uploading report: ${file.name} (${Math.round(size / 1024)} KB)`
+    );
+
+    try {
+      // STEP 1: request signed PUT URL
+      const { url, key } = await LabOrdersService.getReportUploadUrl(
+        id,
+        contentType,
+        size
+      );
+
+      // STEP 2: upload the file to DO Spaces
+      await LabOrdersService.uploadToSignedUrl(url, file, contentType);
+
+      setReportFileNameByOrder((m) => ({ ...m, [id]: file.name }));
+      pushActivity(`Report uploaded to storage (${file.name}). Key: ${key}`);
+
+      if (order.status === "IN_PROGRESS") {
+        await updateStatus("REPORT_READY");
+      }
+    } catch (err: any) {
+      pushActivity(`Report upload failed: ${String(err?.message ?? err)}`);
+      alert(`Upload failed: ${err?.message ?? "unknown error"}`);
+    } finally {
+      setUploadingByOrder((m) => ({ ...m, [id]: false }));
+    }
   };
 
   const savePickupWindow = (start: string, end: string) => {
@@ -716,54 +743,49 @@ const MerchantOrderManager: React.FC = () => {
   };
 
   const cancelOrder = async (reason: string) => {
-  if (!order) return;
+    if (!order) return;
 
-  if (order.status === "COMPLETED") {
-    pushActivity(`Cancel attempted but blocked: Order already Completed.`);
-    setShowCancel(false);
-    return;
-  }
-  if (order.status === "CANCELLED") {
-    setShowCancel(false);
-    return;
-  }
+    if (order.status === "COMPLETED") {
+      pushActivity(`Cancel attempted but blocked: Order already Completed.`);
+      setShowCancel(false);
+      return;
+    }
+    if (order.status === "CANCELLED") {
+      setShowCancel(false);
+      return;
+    }
 
-  // Optimistic update
-  updateOrder((o) => {
-    const paymentNext: Payment =
-      o.payment.status === "Paid"
-        ? { ...o.payment, status: "Refunded" }
-        : o.payment;
-    return {
-      ...o,
-      status: "CANCELLED",
-      payment: paymentNext,
-      phlebotomist: undefined,
-    };
-  });
-
-  pushActivity(`Order cancelled. Reason: ${reason} (pending)`);
-
-  try {
-    // 🔴 tell backend it’s cancelled
-    const res = await updateOrderStatus(order.id, {
-      status: "CANCELLED",
-      reason,
+    // Optimistic update
+    updateOrder((o) => {
+      const paymentNext: Payment =
+        o.payment.status === "Paid"
+          ? { ...o.payment, status: "Refunded" }
+          : o.payment;
+      return {
+        ...o,
+        status: "CANCELLED",
+        payment: paymentNext,
+        phlebotomist: undefined,
+      };
     });
-    const mapped = mapServerOrderToUI(res.order);
-    setOrders((prev) =>
-      prev.map((o) => (o.id === mapped.id ? mapped : o))
-    );
-    pushActivity(`Status confirmed: Cancelled`);
-  } catch (err: any) {
-    pushActivity(
-      `Cancel failed: ${String(err?.message ?? err)}`
-    );
-    alert("Failed to cancel order: " + (err?.message ?? "unknown error"));
-  }
 
-  setShowCancel(false);
-};
+    pushActivity(`Order cancelled. Reason: ${reason} (pending)`);
+
+    try {
+      const res = await updateOrderStatus(order.id, {
+        status: "CANCELLED",
+        reason,
+      });
+      const mapped = mapServerOrderToUI(res.order);
+      setOrders((prev) => prev.map((o) => (o.id === mapped.id ? mapped : o)));
+      pushActivity(`Status confirmed: Cancelled`);
+    } catch (err: any) {
+      pushActivity(`Cancel failed: ${String(err?.message ?? err)}`);
+      alert("Failed to cancel order: " + (err?.message ?? "unknown error"));
+    }
+
+    setShowCancel(false);
+  };
 
   const FLOW_STEPS = ORDER_STEPS.filter((s) => s.key !== "CANCELLED");
   const FLOW_INDEX: Record<OrderStatus, number> = FLOW_STEPS.reduce(
@@ -872,7 +894,7 @@ const MerchantOrderManager: React.FC = () => {
               )}
             </div>
 
-            {/* Right-side buttons — print/save removed; keep refresh in list mode */}
+            {/* Right-side buttons */}
             <div className="flex gap-2 sm:gap-3">
               {!selectedId && (
                 <button
@@ -883,7 +905,9 @@ const MerchantOrderManager: React.FC = () => {
                   disabled={refreshingRef.current}
                 >
                   <FaSync
-                    className={refreshingRef.current ? "animate-spin mr-2" : "mr-2"}
+                    className={
+                      refreshingRef.current ? "animate-spin mr-2" : "mr-2"
+                    }
                   />
                   Refresh
                 </button>
@@ -948,7 +972,7 @@ const MerchantOrderManager: React.FC = () => {
           </div>
         )}
 
-        {/* List view (small cards) */}
+        {/* List view */}
         {!loading && !error && !selectedId && orders.length > 0 && (
           <div className="p-4 sm:p-6">
             {/* -------- Toolbar -------- */}
@@ -986,7 +1010,7 @@ const MerchantOrderManager: React.FC = () => {
                   </select>
                 </div>
 
-                {/* Day Filter (default Today) */}
+                {/* Day Filter */}
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <FaClock className="text-gray-400 hidden sm:block" />
                   <select
@@ -1049,7 +1073,9 @@ const MerchantOrderManager: React.FC = () => {
                   disabled={refreshingRef.current}
                 >
                   <FaSync
-                    className={refreshingRef.current ? "animate-spin mr-2" : "mr-2"}
+                    className={
+                      refreshingRef.current ? "animate-spin mr-2" : "mr-2"
+                    }
                   />
                   Refresh
                 </button>
@@ -1167,7 +1193,9 @@ const MerchantOrderManager: React.FC = () => {
                       <button
                         onClick={() => setEditPickup((v) => !v)}
                         className="rounded-full bg-red-600 text-white px-3 py-1 text-xs font-semibold flex items-center gap-2 hover:bg-red-700"
-                        aria-label={editPickup ? "Close pickup editor" : "Edit pickup window"}
+                        aria-label={
+                          editPickup ? "Close pickup editor" : "Edit pickup window"
+                        }
                       >
                         <FaEdit /> {editPickup ? "Close" : "Edit"}
                       </button>
@@ -1242,9 +1270,7 @@ const MerchantOrderManager: React.FC = () => {
                         {order.items.map((it, idx) => (
                           <tr
                             key={`${it.type}-${it.id}-${idx}`}
-                            className={
-                              idx % 2 === 0 ? "bg-white" : "bg-gray-50"
-                            }
+                            className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}
                           >
                             <td className="px-5 py-3 font-medium text-gray-800">
                               {it.name}
@@ -1352,7 +1378,9 @@ const MerchantOrderManager: React.FC = () => {
                       <button
                         onClick={() => setEditPayment((v) => !v)}
                         className="rounded-full bg-red-600 text-white px-3 py-1 text-xs font-semibold flex items-center gap-2 hover:bg-red-700"
-                        aria-label={editPayment ? "Close payment editor" : "Edit payment"}
+                        aria-label={
+                          editPayment ? "Close payment editor" : "Edit payment"
+                        }
                       >
                         <FaEdit /> {editPayment ? "Close" : "Edit"}
                       </button>
@@ -1419,47 +1447,60 @@ const MerchantOrderManager: React.FC = () => {
                     <div className="text-sm text-gray-600">
                       Order is cancelled. Uploads are disabled.
                     </div>
-                  ) : order.reportUrl ? (
-                    <div className="text-sm">
-                      <div className="mb-2">
-                        Uploaded:{" "}
-                        <span className="font-semibold">
-                          {reportFileNameByOrder[order.id] ?? "report.pdf"}
-                        </span>
-                      </div>
-                      <a
-                        className="underline text-red-600"
-                        href={order.reportUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Open report
-                      </a>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          className="rounded-full border px-3 py-1 text-xs hover:bg-red-50"
-                          onClick={() =>
-                            updateOrder((o) => ({ ...o, reportUrl: undefined }))
-                          }
-                        >
-                          Replace
-                        </button>
-                      </div>
-                    </div>
                   ) : (
-                    <label className="flex flex-col items-center justify-center border-2 border-dashed border-red-200 rounded-xl p-6 cursor-pointer hover:bg-red-50">
-                      <input
-                        type="file"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) uploadReport(f);
-                        }}
-                      />
-                      <div className="text-sm text-gray-700">
-                        Drag & drop or click to upload PDF/Image
-                      </div>
-                    </label>
+                    <>
+                      {reportFileNameByOrder[order.id] ? (
+                        <div className="text-sm">
+                          <div className="mb-2">
+                            Uploaded:{" "}
+                            <span className="font-semibold">
+                              {reportFileNameByOrder[order.id]}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            Stored securely in DO Spaces. (Link will be
+                            available from backend when needed.)
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <label className="rounded-full border px-3 py-1 text-xs hover:bg-red-50 cursor-pointer">
+                              <input
+                                type="file"
+                                className="hidden"
+                                onChange={async (e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) await uploadReport(f);
+                                }}
+                                disabled={!!uploadingByOrder[order.id]}
+                              />
+                              Replace
+                            </label>
+                          </div>
+                        </div>
+                      ) : (
+                        <label
+                          className={`flex flex-col items-center justify-center border-2 border-dashed border-red-200 rounded-xl p-6 cursor-pointer hover:bg-red-50 ${
+                            uploadingByOrder[order.id]
+                              ? "opacity-60 cursor-not-allowed"
+                              : ""
+                          }`}
+                        >
+                          <input
+                            type="file"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const f = e.target.files?.[0];
+                              if (f) await uploadReport(f);
+                            }}
+                            disabled={!!uploadingByOrder[order.id]}
+                          />
+                          <div className="text-sm text-gray-700">
+                            {uploadingByOrder[order.id]
+                              ? "Uploading…"
+                              : "Drag & drop or click to upload PDF/Image"}
+                          </div>
+                        </label>
+                      )}
+                    </>
                   )}
                 </SectionCard>
 
