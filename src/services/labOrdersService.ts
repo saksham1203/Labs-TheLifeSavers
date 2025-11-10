@@ -23,19 +23,24 @@ export const LabOrdersService = {
     return res.data.orders;
   },
 
-  /** Get details of a specific order by ID */
+  /** Get details of a specific order by ID (or public code) */
   async fetchOrderById(id: string) {
     const headers = await getAuthHeaders();
-    const res = await axios.get(`${API_BASE}/lab-orders/${encodeURIComponent(id)}`, { headers });
+    const res = await axios.get(
+      `${API_BASE}/lab-orders/${encodeURIComponent(id)}`,
+      { headers }
+    );
     return res.data.order;
   },
 
   /** Update an order's status */
   async updateStatus(id: string, body: Record<string, any>) {
     const headers = await getAuthHeaders();
-    const res = await axios.patch(`${API_BASE}/lab-orders/${encodeURIComponent(id)}/status`, body, {
-      headers,
-    });
+    const res = await axios.patch(
+      `${API_BASE}/lab-orders/${encodeURIComponent(id)}/status`,
+      body,
+      { headers }
+    );
     return res.data;
   },
 
@@ -63,17 +68,18 @@ export const LabOrdersService = {
    * - Do not add extra headers (like x-amz-acl) unless your server signed them.
    * - The Content-Type MUST match the one used when presigning.
    */
-  async uploadToSignedUrl(url: string, file: Blob | File, contentType: string): Promise<boolean> {
-    // Browsers will issue a CORS preflight OPTIONS automatically. Your Spaces CORS rule must allow it.
+  async uploadToSignedUrl(
+    url: string,
+    file: Blob | File,
+    contentType: string
+  ): Promise<boolean> {
     const resp = await fetch(url, {
       method: "PUT",
-      mode: "cors", // explicit
-      // Don't set Content-Length manually; the browser handles it.
+      mode: "cors",
       headers: {
         "Content-Type": contentType || "application/octet-stream",
       },
       body: file,
-      // helps avoid referrer related mismatches in some strict setups
       referrerPolicy: "no-referrer",
     });
 
@@ -83,24 +89,54 @@ export const LabOrdersService = {
         extra = await resp.text();
       } catch {}
       throw new Error(
-        `Upload failed: ${resp.status} ${resp.statusText}${extra ? ` — ${extra}` : ""}`
+        `Upload failed: ${resp.status} ${resp.statusText}${
+          extra ? ` — ${extra}` : ""
+        }`
       );
     }
     return true;
+  },
+
+  /**
+   * OPTIONAL STEP 3 (explicit, manual): confirm a report upload.
+   * This will validate the object exists and (per backend) can mark REPORT_READY.
+   * We won't auto-call this—UI will trigger when the admin chooses.
+   * Response: { success: true, order: ... }
+   */
+  async confirmReportUpload(id: string, key: string) {
+    const headers = await getAuthHeaders();
+    const res = await axios.post(
+      `${API_BASE}/lab-orders/${encodeURIComponent(id)}/report`,
+      { key },
+      { headers }
+    );
+    return res.data;
+  },
+
+  /**
+   * (Optional convenience) Get a short-lived download URL for the user/admin
+   * depending on your auth context.
+   * Response: { success: true, url: string }
+   */
+  async getReportDownloadUrl(id: string) {
+    const headers = await getAuthHeaders();
+    const res = await axios.get(
+      `${API_BASE}/lab-orders/${encodeURIComponent(id)}/report/download-url`,
+      { headers }
+    );
+    return res.data;
   },
 };
 
 /**
  * Helper: Resolve a reliable content-type for a File.
  * Use this value both when requesting the presigned URL AND when doing the PUT.
+ * NOTE: backend currently only accepts PDF ("application/pdf").
  */
 export function detectContentType(file: File): string {
-  // Only allow the types you intend to support
   const fallback = "application/octet-stream";
   if (!file?.type) return fallback;
-
-  // Normalise common pdf/images
   if (file.type === "application/pdf") return "application/pdf";
-  if (file.type.startsWith("image/")) return file.type; // e.g. image/png, image/jpeg
+  // backend rejects images right now; keep fallback for safety (will be rejected)
   return fallback;
 }

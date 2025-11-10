@@ -24,7 +24,8 @@ import {
   FaSync,
 } from "react-icons/fa";
 import { useLabOrders } from "../../hooks/useLabOrders";
-import { LabOrdersService } from "../../services/labOrdersService";
+import { LabOrdersService, detectContentType } from "../../services/labOrdersService";
+import toast, { Toaster } from "react-hot-toast";
 
 // ---- Types reused from customer app ----
 export type OrderStatus =
@@ -102,7 +103,7 @@ export interface Order {
   payment: Payment;
   pickupWindow?: { start: string; end: string }; // ISO
   phlebotomist?: Phlebotomist;
-  reportUrl?: string | null;
+  reportUrl?: string | null; // Spaces object KEY (not public URL)
   notes?: string; // internal notes
   instructions?: string | null; // customer notes
   activity: ActivityEvent[];
@@ -596,6 +597,9 @@ const MerchantOrderManager: React.FC = () => {
 
   const [editPickup, setEditPickup] = useState(false);
   const [editPayment, setEditPayment] = useState(false);
+
+  // we keep a local "label" only for pretty display after upload;
+  // truth of whether something is uploaded comes from order.reportUrl
   const [reportFileNameByOrder, setReportFileNameByOrder] = useState<
     Record<string, string | undefined>
   >({});
@@ -631,6 +635,9 @@ const MerchantOrderManager: React.FC = () => {
     try {
       await reload();
       setLastUpdated(new Date());
+      toast.success("Orders refreshed");
+    } catch (e: any) {
+      toast.error(`Refresh failed: ${e?.message ?? "unknown error"}`);
     } finally {
       refreshingRef.current = false;
     }
@@ -665,15 +672,18 @@ const MerchantOrderManager: React.FC = () => {
   const updateStatus = async (s: OrderStatus) => {
     if (!order) return;
     updateOrder((o) => ({ ...o, status: s }));
-    pushActivity(`Status updated to ${humanize(s)} (pending)`);
+    pushActivity(`Status update requested: ${humanize(s)} (pending)`);
+    const t = toast.loading(`Updating status to ${humanize(s)}…`);
     try {
       const res = await updateOrderStatus(order.id, { status: s });
       const serverOrder = res.order;
       const mapped = mapServerOrderToUI(serverOrder);
       setOrders((prev) => prev.map((o) => (o.id === mapped.id ? mapped : o)));
       pushActivity(`Status confirmed: ${humanize(serverOrder.status)}`);
+      toast.success(`Status set to ${humanize(serverOrder.status)}`, { id: t });
     } catch (err: any) {
       pushActivity(`Status update failed: ${String(err?.message ?? err)}`);
+      toast.error(`Failed to update status: ${err?.message ?? "unknown error"}`, { id: t });
       alert("Failed to update status: " + (err?.message ?? "unknown error"));
     }
   };
@@ -682,6 +692,7 @@ const MerchantOrderManager: React.FC = () => {
     if (!order) return;
     updateOrder((o) => ({ ...o, phlebotomist: p }));
     pushActivity(`Phlebotomist assigned: ${p.name}`);
+    toast.success(`Phlebotomist assigned: ${p.name}`);
   };
 
   const markPaid = () => {
@@ -691,23 +702,30 @@ const MerchantOrderManager: React.FC = () => {
       payment: { ...o.payment, status: "Paid", txnId: `TXN-${Date.now()}` },
     }));
     pushActivity("Payment marked as Paid");
+    toast.success("Payment marked as Paid");
   };
 
-  // NEW: Real upload flow using pre-signed URL
+  // Upload flow using pre-signed URL (NO auto status change)
   const uploadReport = async (file: File) => {
     if (!order) return;
 
-    const id = order.id; // pass order id to API
-    const contentType = file.type || "application/pdf";
+    const id = order.id;
+    const contentType = detectContentType(file); // enforce pdf
     const size = file.size;
+
+    if (contentType !== "application/pdf") {
+      toast.error("Only PDF reports are allowed.");
+      return;
+    }
 
     setUploadingByOrder((m) => ({ ...m, [id]: true }));
     pushActivity(
       `Uploading report: ${file.name} (${Math.round(size / 1024)} KB)`
     );
+    const t = toast.loading("Uploading report…");
 
     try {
-      // STEP 1: request signed PUT URL
+      // STEP 1: request signed PUT URL (also stores the key on the order server-side)
       const { url, key } = await LabOrdersService.getReportUploadUrl(
         id,
         contentType,
@@ -717,14 +735,14 @@ const MerchantOrderManager: React.FC = () => {
       // STEP 2: upload the file to DO Spaces
       await LabOrdersService.uploadToSignedUrl(url, file, contentType);
 
+      // reflect in UI without changing status automatically
       setReportFileNameByOrder((m) => ({ ...m, [id]: file.name }));
+      updateOrder((o) => ({ ...o, reportUrl: key }));
       pushActivity(`Report uploaded to storage (${file.name}). Key: ${key}`);
-
-      if (order.status === "IN_PROGRESS") {
-        await updateStatus("REPORT_READY");
-      }
+      toast.success("Report uploaded. (Status unchanged)", { id: t });
     } catch (err: any) {
       pushActivity(`Report upload failed: ${String(err?.message ?? err)}`);
+      toast.error(`Upload failed: ${err?.message ?? "unknown error"}`, { id: t });
       alert(`Upload failed: ${err?.message ?? "unknown error"}`);
     } finally {
       setUploadingByOrder((m) => ({ ...m, [id]: false }));
@@ -739,6 +757,7 @@ const MerchantOrderManager: React.FC = () => {
         end
       )}`
     );
+    toast.success("Pickup window saved");
     setEditPickup(false);
   };
 
@@ -747,6 +766,7 @@ const MerchantOrderManager: React.FC = () => {
 
     if (order.status === "COMPLETED") {
       pushActivity(`Cancel attempted but blocked: Order already Completed.`);
+      toast("Order already completed; cannot cancel.", { icon: "⚠️" });
       setShowCancel(false);
       return;
     }
@@ -770,6 +790,7 @@ const MerchantOrderManager: React.FC = () => {
     });
 
     pushActivity(`Order cancelled. Reason: ${reason} (pending)`);
+    const t = toast.loading("Cancelling order…");
 
     try {
       const res = await updateOrderStatus(order.id, {
@@ -779,8 +800,10 @@ const MerchantOrderManager: React.FC = () => {
       const mapped = mapServerOrderToUI(res.order);
       setOrders((prev) => prev.map((o) => (o.id === mapped.id ? mapped : o)));
       pushActivity(`Status confirmed: Cancelled`);
+      toast.success("Order cancelled", { id: t });
     } catch (err: any) {
       pushActivity(`Cancel failed: ${String(err?.message ?? err)}`);
+      toast.error("Failed to cancel order", { id: t });
       alert("Failed to cancel order: " + (err?.message ?? "unknown error"));
     }
 
@@ -856,11 +879,21 @@ const MerchantOrderManager: React.FC = () => {
     return list;
   }, [orders, debouncedQuery, statusFilter, dayFilter, sortKey, sortDir]);
 
+  // little helper to derive a display name from the stored Spaces key
+  const prettyNameFromKey = (key?: string | null) => {
+    if (!key) return undefined;
+    const last = key.split("/").pop() || "";
+    return decodeURIComponent(last);
+  };
+
   return (
     <div
       className="min-h-screen flex items-center justify-center p-0 sm:p-6 bg-white"
       style={{ paddingTop: "4rem", paddingBottom: "10rem" }}
     >
+      {/* Toast container */}
+      <Toaster position="top-center" />
+
       <div className="bg-white/80 backdrop-blur rounded-2xl shadow-xl max-w-6xl w-full overflow-hidden relative ring-1 ring-red-100">
         {/* Header */}
         <div className="bg-gradient-to-r from-red-600 via-red-500 to-red-400 text-white py-5 px-4 sm:px-6 shadow-md relative after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-white/40">
@@ -1166,12 +1199,14 @@ const MerchantOrderManager: React.FC = () => {
                           <button
                             className="rounded-full border px-3 py-1 text-xs flex items-center gap-2 hover:bg-red-50"
                             aria-label="Send WhatsApp message"
+                            onClick={() => toast("WhatsApp soon!", { icon: "💬" })}
                           >
                             <FaWhatsapp /> WhatsApp
                           </button>
                           <button
                             className="rounded-full border px-3 py-1 text-xs flex items-center gap-2 hover:bg-red-50"
                             aria-label="Send email"
+                            onClick={() => toast("Email soon!", { icon: "✉️" })}
                           >
                             <FaEnvelope /> Email
                           </button>
@@ -1295,7 +1330,12 @@ const MerchantOrderManager: React.FC = () => {
                   }
                 >
                   <div className="space-y-3">
-                    <AddNote onAdd={(msg) => pushActivity(msg)} />
+                    <AddNote
+                      onAdd={(msg) => {
+                        pushActivity(msg);
+                        toast.success("Note added");
+                      }}
+                    />
                     <ul className="divide-y divide-red-100 border border-red-100 rounded-xl overflow-hidden">
                       {order.activity.map((a, i) => (
                         <li
@@ -1338,12 +1378,13 @@ const MerchantOrderManager: React.FC = () => {
                       {order.status !== "CANCELLED" && (
                         <button
                           className="rounded-full border px-3 py-1 text-xs hover:bg-red-50"
-                          onClick={() =>
+                          onClick={() => {
                             updateOrder((o) => ({
                               ...o,
                               phlebotomist: undefined,
-                            }))
-                          }
+                            }));
+                            toast("Phlebotomist cleared", { icon: "🧪" });
+                          }}
                         >
                           Change
                         </button>
@@ -1421,12 +1462,13 @@ const MerchantOrderManager: React.FC = () => {
                         Mark Paid
                       </button>
                       <button
-                        onClick={() =>
+                        onClick={() => {
                           updateOrder((o) => ({
                             ...o,
                             payment: { ...o.payment, status: "Refunded" },
-                          }))
-                        }
+                          }));
+                          toast("Payment marked Refunded", { icon: "↩️" });
+                        }}
                         className="rounded-full bg-gray-200 px-4 py-2 text-sm font-semibold hover:bg-gray-300"
                       >
                         Mark Refunded
@@ -1449,32 +1491,74 @@ const MerchantOrderManager: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                      {reportFileNameByOrder[order.id] ? (
+                      {/* Show an "already uploaded" state if reportUrl exists (from DB) */}
+                      {(order.reportUrl || reportFileNameByOrder[order.id]) ? (
                         <div className="text-sm">
                           <div className="mb-2">
-                            Uploaded:{" "}
+                            Uploaded:&nbsp;
                             <span className="font-semibold">
-                              {reportFileNameByOrder[order.id]}
+                              {reportFileNameByOrder[order.id] ||
+                                prettyNameFromKey(order.reportUrl) ||
+                                "Report.pdf"}
                             </span>
                           </div>
                           <div className="text-xs text-gray-600">
-                            Stored securely in DO Spaces. (Link will be
-                            available from backend when needed.)
+                            File is uploaded to secure storage.
                           </div>
-                          <div className="mt-3 flex gap-2">
-                            <label className="rounded-full border px-3 py-1 text-xs hover:bg-red-50 cursor-pointer">
-                              <input
-                                type="file"
-                                className="hidden"
-                                onChange={async (e) => {
-                                  const f = e.target.files?.[0];
-                                  if (f) await uploadReport(f);
-                                }}
-                                disabled={!!uploadingByOrder[order.id]}
-                              />
-                              Replace
-                            </label>
-                          </div>
+
+                          {/* Manual confirm button to change status WHEN admin decides */}
+                          {order.status !== "REPORT_READY" &&
+                            order.status !== "COMPLETED" && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button
+                                  onClick={async () => {
+                                    if (!order.reportUrl) {
+                                      toast.error("No report key present to confirm.");
+                                      return;
+                                    }
+                                    const t = toast.loading("Confirming report…");
+                                    try {
+                                      const res = await LabOrdersService.confirmReportUpload(
+                                        order.id,
+                                        order.reportUrl
+                                      );
+                                      const mapped = mapServerOrderToUI(res.order);
+                                      setOrders((prev) =>
+                                        prev.map((o) =>
+                                          o.id === mapped.id ? mapped : o
+                                        )
+                                      );
+                                      toast.success("Report confirmed & marked ready.", {
+                                        id: t,
+                                      });
+                                      pushActivity("Report confirmed by admin.");
+                                    } catch (e: any) {
+                                      toast.error(
+                                        `Confirm failed: ${e?.message ?? "unknown error"}`,
+                                        { id: t }
+                                      );
+                                    }
+                                  }}
+                                  className="rounded-full bg-emerald-600 text-white px-4 py-2 text-sm font-semibold hover:bg-emerald-700"
+                                >
+                                  Confirm report (mark REPORT_READY)
+                                </button>
+
+                                <label className="rounded-full border px-3 py-2 text-xs hover:bg-red-50 cursor-pointer">
+                                  <input
+                                    type="file"
+                                    accept="application/pdf"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                      const f = e.target.files?.[0];
+                                      if (f) await uploadReport(f);
+                                    }}
+                                    disabled={!!uploadingByOrder[order.id]}
+                                  />
+                                  Replace file
+                                </label>
+                              </div>
+                            )}
                         </div>
                       ) : (
                         <label
@@ -1483,9 +1567,11 @@ const MerchantOrderManager: React.FC = () => {
                               ? "opacity-60 cursor-not-allowed"
                               : ""
                           }`}
+                          title="PDF only"
                         >
                           <input
                             type="file"
+                            accept="application/pdf"
                             className="hidden"
                             onChange={async (e) => {
                               const f = e.target.files?.[0];
@@ -1496,7 +1582,7 @@ const MerchantOrderManager: React.FC = () => {
                           <div className="text-sm text-gray-700">
                             {uploadingByOrder[order.id]
                               ? "Uploading…"
-                              : "Drag & drop or click to upload PDF/Image"}
+                              : "Drag & drop or click to upload PDF"}
                           </div>
                         </label>
                       )}
@@ -1624,7 +1710,12 @@ const MerchantOrderManager: React.FC = () => {
             <p className="text-sm text-gray-600 mb-4">
               Add a brief reason to keep the audit trail clean.
             </p>
-            <CancelForm onCancel={(r) => cancelOrder(r)} />
+            <CancelForm
+              onCancel={(r) => {
+                cancelOrder(r);
+                // modal closes in cancelOrder finally
+              }}
+            />
           </div>
         </div>
       )}
