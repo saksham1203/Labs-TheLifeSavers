@@ -90,6 +90,7 @@ interface ActivityEvent {
 
 export interface Order {
   id: string;
+  publicId: string;  // ORD-XXXX (NEW)
   placedAt: string; // ISO
   labName: string;
   patient: Patient;
@@ -127,6 +128,7 @@ const toLowerType = (t: string): "package" | "test" => {
 function mapServerOrderToUI(o: any): Order {
   return {
     id: o.id,
+    publicId: o.orderId ?? o.id,
     placedAt: o.createdAt,
     labName: o.labName ?? "",
     patient: {
@@ -477,12 +479,12 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
       className="group relative rounded-2xl border border-red-100 bg-white/95 backdrop-blur
                  p-5 flex flex-col gap-4 shadow-sm
                  hover:shadow-2xl hover:-translate-y-0.5 hover:border-red-200 transition-all duration-300"
-      aria-label={`Order card ${order.id}`}
+      aria-label={`Order card ${order.publicId}`}
     >
       {/* Top Row: ID + Total */}
       <div className="relative z-10 flex items-center justify-between">
         <div className="font-mono text-sm sm:text-base font-semibold text-gray-800">
-          #{order.id}
+          #{order.publicId}
         </div>
         <div
           className="shrink-0 rounded-full px-3 py-1 text-xs font-extrabold
@@ -573,7 +575,7 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
                      px-4 py-1.5 text-xs sm:text-sm font-semibold shadow-md
                      hover:shadow-lg hover:from-red-700 hover:to-red-600
                      active:scale-[0.98] transition-all"
-          aria-label={`Open order ${order.id}`}
+          aria-label={`Open order ${order.publicId}`}
         >
           Open
         </button>
@@ -954,7 +956,7 @@ const MerchantOrderManager: React.FC = () => {
               <div className="text-lg sm:text-xl font-medium text-white">
                 Order ID{" "}
                 <span className="font-mono font-bold text-yellow-300">
-                  {order.id}
+                  {order.publicId}
                 </span>
               </div>
               <div className="text-lg sm:text-xl font-medium text-white">

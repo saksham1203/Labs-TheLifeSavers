@@ -19,7 +19,12 @@ export function useLabOrders() {
       setLoading(true);
       setError(null);
       const data = await LabOrdersService.fetchOrders();
-      setOrders(data ?? []);
+      setOrders(
+        (data ?? []).map((o: any) => ({
+          ...o,
+          publicId: o.orderId ?? o.id, // 👈 ADD THIS
+        }))
+      );
     } catch (err: any) {
       setError(err.message || "Failed to load orders");
     } finally {
