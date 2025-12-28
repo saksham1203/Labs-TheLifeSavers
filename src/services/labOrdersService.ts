@@ -2,7 +2,7 @@
 import axios from "axios";
 import { Preferences } from "@capacitor/preferences";
 
-export let API_BASE = "http://localhost:5000/api";
+export let API_BASE = "https://services.thelifesavers.in/api";
 // For local testing, you may override at runtime: API_BASE = "http://localhost:5000/api";
 
 /** Auth headers from Capacitor Preferences */
