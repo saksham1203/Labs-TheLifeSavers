@@ -586,7 +586,7 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
 
 // ---- Main component ----
 const MerchantOrderManager: React.FC = () => {
-  const { orders: serverOrders, loading, error, reload, updateOrderStatus } =
+  const { orders: serverOrders, loading, error, reload, updateOrderStatus, updatePaymentStatus } =
     useLabOrders();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -697,14 +697,29 @@ const MerchantOrderManager: React.FC = () => {
     toast.success(`Phlebotomist assigned: ${p.name}`);
   };
 
-  const markPaid = () => {
+  const markPaid = async () => {
     if (!order) return;
+
+    // optimistic UI
     updateOrder((o) => ({
       ...o,
       payment: { ...o.payment, status: "Paid", txnId: `TXN-${Date.now()}` },
     }));
-    pushActivity("Payment marked as Paid");
-    toast.success("Payment marked as Paid");
+    pushActivity("Payment marked as Paid (pending)");
+
+    const t = toast.loading("Updating payment status…");
+
+    try {
+      const res = await updatePaymentStatus(order.id, "Paid");
+      const mapped = mapServerOrderToUI(res.order);
+      setOrders((prev) => prev.map((o) => (o.id === mapped.id ? mapped : o)));
+
+      pushActivity("Payment confirmed as Paid");
+      toast.success("Payment updated", { id: t });
+    } catch (err: any) {
+      toast.error(`Payment update failed`, { id: t });
+      pushActivity(`Payment update failed`);
+    }
   };
 
   // Upload flow using pre-signed URL (NO auto status change)

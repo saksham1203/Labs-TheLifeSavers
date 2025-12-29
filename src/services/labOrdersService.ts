@@ -126,6 +126,19 @@ export const LabOrdersService = {
     );
     return res.data;
   },
+
+  async updatePaymentStatus(
+  id: string,
+  paymentStatus: "PAID" | "REFUNDED" | "PENDING"
+) {
+  const headers = await getAuthHeaders();
+  const res = await axios.patch(
+    `${API_BASE}/lab-orders/${encodeURIComponent(id)}/payment`,
+    { paymentStatus },
+    { headers }
+  );
+  return res.data; // expect { success, order }
+},
 };
 
 /**
@@ -140,3 +153,4 @@ export function detectContentType(file: File): string {
   // backend rejects images right now; keep fallback for safety (will be rejected)
   return fallback;
 }
+

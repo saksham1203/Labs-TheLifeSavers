@@ -74,11 +74,52 @@ export function useLabOrders() {
     []
   );
 
+  const updatePaymentStatus = useCallback(
+  async (id: string, paymentStatus: "Paid" | "Refunded" | "Pending") => {
+    let prevSnapshot: any[] = [];
+
+    setOrders((prev) => {
+      prevSnapshot = prev;
+      return prev.map((o) =>
+        o.id === id
+          ? {
+              ...o,
+              payment: { ...o.payment, status: paymentStatus },
+            }
+          : o
+      );
+    });
+
+    try {
+      const res = await LabOrdersService.updatePaymentStatus(
+        id,
+        paymentStatus.toUpperCase() as any // "PAID"
+      );
+
+      const serverOrder = res.order;
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === serverOrder.id ? { ...o, ...serverOrder } : o
+        )
+      );
+
+      return res;
+    } catch (err: any) {
+      setOrders(prevSnapshot);
+      setError(err?.message ?? "Failed to update payment");
+      throw err;
+    }
+  },
+  []
+);
+
+
   return {
     orders,
     loading,
     error,
     reload: loadOrders, // manually trigger reload
     updateOrderStatus,
+    updatePaymentStatus,
   };
 }
