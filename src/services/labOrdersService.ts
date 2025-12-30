@@ -139,6 +139,28 @@ export const LabOrdersService = {
   );
   return res.data; // expect { success, order }
 },
+
+async fetchPhlebos() {
+  const headers = await getAuthHeaders();
+  const res = await axios.get(`${API_BASE}/phlebos`, { headers });
+  return res.data.phlebos as any[];
+},
+
+async assignPhlebo(orderId: string, phleboId: string) {
+  const headers = await getAuthHeaders();
+
+  const res = await axios.patch(
+    `${API_BASE}/lab-orders/${encodeURIComponent(orderId)}/assign-phlebo`,
+    {
+      phleboId, // ✅ MUST MATCH BACKEND
+    },
+    { headers }
+  );
+
+  return res.data; // { success, order }
+}
+
+
 };
 
 /**

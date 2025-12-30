@@ -166,12 +166,12 @@ function mapServerOrderToUI(o: any): Order {
     },
     pickupWindow: parsePickupWindow(o.pickupWindow),
     phlebotomist: o.phlebo
-      ? {
-          id: o.phlebo.id ?? "phleb",
-          name: o.phlebo.name ?? "Phlebo",
-          phone: o.phlebo.phone ?? "",
-        }
-      : undefined,
+  ? {
+      id: o.phlebo.id,
+      name: `${o.phlebo.firstName ?? ""} ${o.phlebo.lastName ?? ""}`.trim(),
+      phone: o.phlebo.mobile ?? "",
+    }
+  : undefined,
     reportUrl: o.reportUrl ?? null,
     notes: o.notes ?? undefined,
     instructions: o.instructions ?? null,
@@ -586,7 +586,7 @@ const OrderCard: React.FC<{ order: Order; onOpen: () => void }> = ({
 
 // ---- Main component ----
 const MerchantOrderManager: React.FC = () => {
-  const { orders: serverOrders, loading, error, reload, updateOrderStatus, updatePaymentStatus } =
+  const { orders: serverOrders, loading, error, reload, updateOrderStatus, updatePaymentStatus, phlebos, assignPhlebo } =
     useLabOrders();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -690,12 +690,35 @@ const MerchantOrderManager: React.FC = () => {
     }
   };
 
-  const assignPhleb = (p: Phlebotomist) => {
-    if (!order) return;
-    updateOrder((o) => ({ ...o, phlebotomist: p }));
-    pushActivity(`Phlebotomist assigned: ${p.name}`);
-    toast.success(`Phlebotomist assigned: ${p.name}`);
+const onAssignPhlebo = async (p: any) => {
+  if (!order) return;
+
+  const uiPhlebo: Phlebotomist = {
+    id: p.id,
+    name: `${p.firstName} ${p.lastName}`.trim(),
+    phone: p.mobile,
   };
+
+  // Optimistic UI
+  updateOrder((o) => ({ ...o, phlebotomist: uiPhlebo }));
+  pushActivity(`Assigning phlebotomist: ${uiPhlebo.name}`);
+
+  const t = toast.loading("Assigning phlebotomist…");
+
+  try {
+    const res = await assignPhlebo(order.id, p.id); // 🔥 BACKEND CALL
+    const mapped = mapServerOrderToUI(res.order);
+
+    setOrders((prev) =>
+      prev.map((o) => (o.id === mapped.id ? mapped : o))
+    );
+
+    toast.success("Phlebotomist assigned", { id: t });
+  } catch (e: any) {
+    toast.error("Failed to assign phlebotomist", { id: t });
+  }
+};
+
 
   const markPaid = async () => {
     if (!order) return;
@@ -851,11 +874,6 @@ const MerchantOrderManager: React.FC = () => {
     };
   }, [order]);
 
-  const PHLEBS: Phlebotomist[] = [
-    { id: "p1", name: "Rohit Kulkarni", phone: "+91 98XXXXXX01" },
-    { id: "p2", name: "Sneha Iyer", phone: "+91 98XXXXXX02" },
-    { id: "p3", name: "Manish Gupta", phone: "+91 98XXXXXX03" },
-  ];
 
   // -------- derive visible orders by filters/sort/search --------
   const visibleOrders = useMemo(() => {
@@ -1396,30 +1414,36 @@ const MerchantOrderManager: React.FC = () => {
                         <button
                           className="rounded-full border px-3 py-1 text-xs hover:bg-red-50"
                           onClick={() => {
-                            updateOrder((o) => ({
-                              ...o,
-                              phlebotomist: undefined,
-                            }));
-                            toast("Phlebotomist cleared", { icon: "🧪" });
+                            toast("Unassign not supported yet", { icon: "⚠️" });
                           }}
                         >
                           Change
                         </button>
+
                       )}
                     </div>
                   ) : (
                     <div className="grid gap-2">
-                      {PHLEBS.map((p) => (
+                      {phlebos.map((p) => (
                         <button
                           key={p.id}
                           className="rounded-xl border px-3 py-2 text-left hover:bg-red-50 disabled:opacity-50"
-                          onClick={() => assignPhleb(p)}
-                          disabled={order.status === "CANCELLED"}
+                          onClick={() => onAssignPhlebo(p)}
+                          disabled={
+                            order.status === "CANCELLED" ||
+                            order.status === "SAMPLE_COLLECTED" ||
+                            order.status === "IN_PROGRESS" ||
+                            order.status === "REPORT_READY" ||
+                            order.status === "COMPLETED"
+                          }
                         >
-                          <div className="text-sm font-semibold">{p.name}</div>
-                          <div className="text-xs text-gray-600">{p.phone}</div>
+                          <div className="text-sm font-semibold">
+                            {p.firstName} {p.lastName}
+                          </div>
+                          <div className="text-xs text-gray-600">{p.mobile}</div>
                         </button>
                       ))}
+
                     </div>
                   )}
                 </SectionCard>

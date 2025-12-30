@@ -10,6 +10,8 @@ export function useLabOrders() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [phlebos, setPhlebos] = useState<any[]>([]);
+
 
   /**
    * Fetch orders from API and update state
@@ -36,6 +38,19 @@ export function useLabOrders() {
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
+
+  const loadPhlebos = useCallback(async () => {
+  try {
+    const data = await LabOrdersService.fetchPhlebos();
+    setPhlebos(data ?? []);
+  } catch (e) {
+    console.error("Failed to load phlebos", e);
+  }
+}, []);
+
+useEffect(() => {
+  loadPhlebos();
+}, [loadPhlebos]);
 
   /**
    * Update order status on server.
@@ -113,6 +128,25 @@ export function useLabOrders() {
   []
 );
 
+const assignPhlebo = useCallback(
+  async (orderId: string, phleboId: string) => {
+    // NO optimistic UI here – dashboard already handles it
+    const res = await LabOrdersService.assignPhlebo(orderId, phleboId);
+
+    const serverOrder = res.order;
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === serverOrder.id ? { ...o, ...serverOrder } : o
+      )
+    );
+
+    return res;
+  },
+  []
+);
+
+
+
 
   return {
     orders,
@@ -121,5 +155,8 @@ export function useLabOrders() {
     reload: loadOrders, // manually trigger reload
     updateOrderStatus,
     updatePaymentStatus,
+    phlebos,          // 👈 NEW
+    reloadPhlebos: loadPhlebos,
+    assignPhlebo, // 👈 NEW
   };
 }
