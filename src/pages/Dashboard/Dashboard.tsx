@@ -130,7 +130,7 @@ function mapServerOrderToUI(o: any): Order {
     id: o.id,
     publicId: o.orderId ?? o.id,
     placedAt: o.createdAt,
-    labName: o.labName ?? "",
+    labName: o.lab?.name ?? "",
     patient: {
       name: o.patientName ?? "Unknown",
       age: Number(o.age ?? 0),
